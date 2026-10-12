@@ -393,3 +393,77 @@ def test_adjacency_front_back_disabled():
     row_set = {n[0] for n in neighbors}
     # All returned neighbours must be in the same row
     assert row_set == {1}, f"Expected only row 1, got rows {row_set}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 11. Multi-Department Allocation (5+ Departments)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_multi_department_allocation_five_plus_depts():
+    """
+    Ensure that when 5+ departments (CSE, IT, ECE, EEE, MECH, CIVIL) are present,
+    EVERY department's students receive seat allocations in the generated plan.
+    No department may be omitted, hardcoded, or starved.
+    """
+    room_a = _make_room(room_id=1, name="Hall A", rows=8, cols=5, spb=2)  # 80 seats
+    room_b = _make_room(room_id=2, name="Hall B", rows=6, cols=5, spb=2)  # 60 seats
+
+    depts = [
+        _make_dept(1, "CSE",   "Operating Systems",        20),
+        _make_dept(2, "IT",    "Cloud Computing",          20),
+        _make_dept(3, "ECE",   "VLSI Design",              20),
+        _make_dept(4, "EEE",   "Power Systems",            20),
+        _make_dept(5, "MECH",  "Heat Transfer",            20),
+        _make_dept(6, "CIVIL", "Environmental Engg",       20),
+    ]
+
+    total_candidates = sum(len(d.rolls) for d in depts)  # 120 students
+    total_capacity = room_a.rows * room_a.cols * room_a.seats_per_bench + room_b.rows * room_b.cols * room_b.seats_per_bench  # 140 seats
+
+    result = generate_seating(depts, [room_a, room_b], check_front_back=True)
+
+    # 1. Total seated count must match all 120 candidates
+    assert result.unseated_count == 0, f"Unseated: {result.unseated_count}, warnings: {result.warnings}"
+    assert result.total_assigned == total_candidates
+
+    # 2. Count allocated seats per department across all rooms
+    dept_seated_counts: dict[str, int] = {}
+    for r in result.room_results:
+        for s in r.seats:
+            if not s.is_empty and s.dept_code:
+                dept_seated_counts[s.dept_code] = dept_seated_counts.get(s.dept_code, 0) + 1
+
+    expected_codes = {"CSE", "IT", "ECE", "EEE", "MECH", "CIVIL"}
+    assert set(dept_seated_counts.keys()) == expected_codes, (
+        f"Missing departments! Expected {expected_codes}, got {set(dept_seated_counts.keys())}"
+    )
+
+    for code in expected_codes:
+        assert dept_seated_counts[code] == 20, f"Department {code} only got {dept_seated_counts[code]}/20 seats"
+
+    # 3. Adjacency rule validation: zero violations across all rooms
+    for r_res in result.room_results:
+        matched_room = room_a if r_res.room_id == 1 else room_b
+        violations = _check_no_violations(r_res.seats, matched_room, check_front_back=True)
+        assert violations == [], f"Adjacency violations found in {r_res.room_name}:\n" + "\n".join(violations)
+
+
+def test_alphanumeric_roll_numbers_with_exclusions():
+    """
+    Test roll generation and expansion with college register numbers and exclusions.
+    """
+    rolls = generate_rolls(
+        "CSE",
+        5,
+        roll_start="927623BCS001",
+        roll_end="927623BCS007",
+        exclusions=["927623BCS003", "927623BCS005"],
+    )
+    assert rolls == [
+        "927623BCS001",
+        "927623BCS002",
+        "927623BCS004",
+        "927623BCS006",
+        "927623BCS007",
+    ]
+

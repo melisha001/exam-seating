@@ -14,22 +14,28 @@ An enterprise-grade, full-stack **Exam Seating Arrangement System** built for en
 - **Single Department Fallback**: If only one department is scheduled, automatically inserts empty spacer seats to maintain non-adjacency, issuing clear warnings.
 - **Roll Number Ordering**: Preserves student roll-number sequencing within each department.
 
-### 2. Live Interactive Seating View
+### 2. Live Interactive Seating View & Branch-Wise Allocation
 - **Realistic Bench Layout**: Visualizes examination halls with Blackboard/Podium orientation, bench columns, and seat numbers (`S1`, `S2`, `S3`).
+- **Branch-Wise Allocation View**: Dedicated tab showing department-by-department breakdown of examination halls seated in, roll number ranges, seat numbers, and a complete cross-department distribution matrix.
+- **Hall Header Branch Chips**: Color-coded branch chips on each hall view showing branch breakdown and seated student counts.
 - **Interactive Seat Swapping**: Supports both **Click-to-Swap** and HTML5 **Drag-and-Drop**. Instant re-validation via backend API rejects any swap that would create adjacent cheating opportunities (`409 Conflict`).
 - **Student Search**: Search any candidate roll number to highlight their seat with a pulsing ring and jump directly to their hall.
 - **Room Carousel / Tabs**: Displays live utilization progress bars, seated vs capacity counts, and invigilator details.
 
 ### 3. Official Document Exports
-- **Landscape PDF (ReportLab)**: Generates an official, print-ready landscape A4 PDF with one page per hall, full seating grid, utilization stats, and an **Invigilator Signature line**.
-- **Excel Workbook (openpyxl)**: Generates a multi-sheet spreadsheet with department pastel color coding, candidate roll numbers, subjects, and an executive summary sheet.
+- **Landscape PDF (ReportLab)**: Generates an official, print-ready landscape A4 PDF with one page per hall, full seating grid, utilization stats, invigilator signature line, and an **extra Branch-Wise Seating Allocation Summary page**.
+- **Excel Workbook (openpyxl)**: Generates a multi-sheet spreadsheet with department pastel color coding, candidate roll numbers, subjects, executive summary sheet, and an **extra Branch Summary sheet**.
 
 ### 4. 5-Step Generation Wizard
 - **Step 1**: Exam Date & Session slot (`FN` / `AN`).
-- **Step 2**: Add departments, subject names, candidate counts, and optional roll number ranges.
+- **Step 2**: Repeatable multi-department registration with department picker + inline "Add New Department", subject name/code, alphanumeric roll number range (`927623BCS001` → `927623BCS060`), absentees/exclusions, live auto-calculated student count, and summary table with edit/remove actions.
 - **Step 3**: Select examination halls with real-time capacity vs student requirement tally.
 - **Step 4**: Anti-malpractice rule configuration & Front/Back toggle.
 - **Step 5**: One-click generation with visual progress and instant plan navigation.
+
+### 5. Session & Plan Management
+- **Delete Session**: Complete cascade deletion of an exam session, its exam entries, and generated seating plans with confirmation dialog.
+- **Clear Plan Only**: Dedicated button and endpoint to reset the seating plan while keeping registered sessions and departments intact.
 
 ---
 
@@ -38,11 +44,11 @@ An enterprise-grade, full-stack **Exam Seating Arrangement System** built for en
 | Layer | Technology | Details |
 |---|---|---|
 | **Backend** | Python 3.12+ / 3.14 | FastAPI, Uvicorn, Pydantic v2 |
-| **Database** | SQLite + SQLAlchemy 2.0 | Clean ORM models, cascade relationships |
+| **Database** | SQLite + SQLAlchemy 2.0 | Clean ORM models, cascade relationships, safe auto-migration |
 | **Algorithm** | Pure Python | Round-Robin greedy interleaver + constraint graph |
-| **Frontend** | React 19 + TypeScript + Vite | Tailwind CSS, Lucide React, Framer Motion |
+| **Frontend** | React 19 + TypeScript + Vite | Tailwind CSS, Lucide React |
 | **Exports** | ReportLab & OpenPyXL | Binary PDF & Excel generation |
-| **Testing** | Pytest + Pytest-Asyncio | 23 automated unit tests |
+| **Testing** | Pytest + Pytest-Asyncio | 28 automated unit tests |
 
 ---
 
@@ -54,16 +60,17 @@ exam-seating/
 │   ├── app/
 │   │   ├── main.py                # FastAPI entry point, CORS, lifespan
 │   │   ├── config.py              # Pydantic Settings
-│   │   ├── database.py            # SQLAlchemy engine, session, Base
+│   │   ├── database.py            # SQLAlchemy engine, session, Base, auto-migration
 │   │   ├── models/                # Room, Department, ExamSession, ExamEntry, SeatingPlan
 │   │   ├── schemas/               # Pydantic request/response schemas
 │   │   ├── crud/                  # Pure database access layers
 │   │   ├── routers/               # REST API endpoints (/rooms, /departments, /sessions, /entries, /plans)
-│   │   ├── services/              # PDF & Excel export generators
+│   │   ├── services/              # PDF & Excel export generators (with branch summary)
 │   │   └── algorithm/             # Pure non-adjacent seating engine & roll number utilities
 │   ├── tests/
-│   │   └── test_seating.py        # 23 Pytest unit tests for constraints & edge cases
-│   ├── seed_data.py               # Database seeder (4 depts, 6 halls, 1 session, initial plan)
+│   │   ├── test_seating.py        # Adjacency, 5+ depts, alphanumeric rolls, exclusions
+│   │   └── test_api_extensions.py # Cascade delete, clear plan only, branch summary
+│   ├── seed_data.py               # Database seeder (6 depts, 6 halls, 1 session, initial plan)
 │   ├── demo_flow.py               # End-to-end demo script (health, plan, swap, file downloads)
 │   ├── requirements.txt           # Python dependencies (native wheels)
 │   └── pytest.ini                 # Pytest test configuration
@@ -71,10 +78,16 @@ exam-seating/
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── Navbar.tsx         # Navigation header, dark mode toggle
-│   │   │   ├── Dashboard.tsx      # Stat cards, recent sessions, department legend
-│   │   │   ├── Wizard.tsx         # 5-Step exam generation wizard
-│   │   │   ├── SeatingView.tsx    # Interactive seating grid, drag/click swap, search
-│   │   │   └── RoomManager.tsx    # Hall & Department CRUD
+│   │   │   ├── Dashboard.tsx      # Stat cards, sessions with Delete & Clear Plan, legend
+│   │   │   ├── Wizard.tsx         # Repeatable multi-department registration wizard
+│   │   │   ├── SeatingView.tsx    # Hall View vs Branch-Wise Allocation tabs
+│   │   │   ├── RoomManager.tsx    # Hall & Department CRUD
+│   │   │   └── seating/
+│   │   │       ├── BranchView.tsx # Department-wise allocation overview & matrix table
+│   │   │       ├── RoomSelector.tsx
+│   │   │       ├── SeatingGrid.tsx
+│   │   │       ├── BenchCard.tsx
+│   │   │       └── StudentDetailDrawer.tsx
 │   │   ├── services/
 │   │   │   └── api.ts             # Typed API client
 │   │   ├── types/                 # TypeScript interfaces
@@ -96,94 +109,6 @@ exam-seating/
 
 ---
 
-### 2. Backend Setup & Run
-
-```bash
-cd backend
-
-# Create virtual environment
-python -m venv venv
-
-# Activate virtual environment
-# Windows:
-.\venv\Scripts\activate
-# Linux/macOS:
-source venv/bin/activate
-
-# Install dependencies (use --only-binary :all: for instant wheel install on Python 3.14)
-pip install --only-binary :all: -r requirements.txt
-
-# Prime database with 4 departments, 6 halls, and sample exams
-python seed_data.py
-
-# Start the API server
-uvicorn app.main:app --reload --port 8000
-```
-
-> **Backend API Docs**: Open [http://localhost:8000/docs](http://localhost:8000/docs) in your browser for the interactive Swagger UI.
-
----
-
-### 3. Frontend Setup & Run
-
-```bash
-cd frontend
-
-# Install npm packages
-npm install
-
-# Start Vite dev server
-npm run dev
-```
-
-> **Web Application**: Open [http://localhost:5173](http://localhost:5173) in your browser.
-
----
-
-### 4. Running the Automated Test Suite
-
-Run the 23 unit tests verifying adjacency rules, edge cases, single department handling, and roll ordering:
-
-```bash
-cd backend
-.\venv\Scripts\python -m pytest tests/ -v
-```
-
-Output:
-```
-tests/test_seating.py::test_no_same_dept_adjacent_two_depts PASSED
-tests/test_seating.py::test_no_same_dept_adjacent_four_depts PASSED
-tests/test_seating.py::test_no_same_subject_adjacent_two_depts PASSED
-tests/test_seating.py::test_single_dept_warning PASSED
-tests/test_seating.py::test_single_dept_leaves_empty_seats PASSED
-tests/test_seating.py::test_rooms_filled_sequentially PASSED
-tests/test_seating.py::test_insufficient_capacity_unseated PASSED
-tests/test_seating.py::test_roll_order_preserved PASSED
-tests/test_seating.py::test_front_back_toggle_off_no_violations PASSED
-...
-============================= 23 passed in 0.13s ==============================
-```
-
----
-
-### 5. Running the End-to-End Demo Script
-
-With the backend running on port 8000:
-
-```bash
-cd backend
-.\venv\Scripts\python demo_flow.py
-```
-
-The demo script automatically:
-1. Checks API health.
-2. Displays all registered halls and departments.
-3. Computes the optimal seating plan across all halls.
-4. Validates manual seat swap constraint checking.
-5. Downloads and saves `sample_seating_plan.pdf` and `sample_seating_plan.xlsx`.
-
----
-
 ## 📡 REST API Reference
 
 | Method | Endpoint | Description |
@@ -194,13 +119,16 @@ The demo script automatically:
 | `GET/POST` | `/api/v1/departments/` | List all departments / Register department |
 | `GET/PUT/DELETE` | `/api/v1/departments/{id}` | Read / Update / Delete department |
 | `GET/POST` | `/api/v1/sessions/` | List exam sessions / Create exam session |
-| `GET/PUT/DELETE` | `/api/v1/sessions/{id}` | Read / Update / Delete session |
+| `GET/PUT/DELETE` | `/api/v1/sessions/{id}` | Read / Update / Delete session (cascades entries & plans) |
 | `GET/POST` | `/api/v1/entries/?session_id={id}` | List / Add exam entries for a session |
+| `PUT/DELETE` | `/api/v1/entries/{id}` | Update / Remove exam entry |
 | `POST` | `/api/v1/plans/generate` | **Execute seating optimization engine** |
 | `GET` | `/api/v1/plans/session/{id}` | Retrieve generated seating plan by session |
+| `DELETE` | `/api/v1/plans/session/{id}` | **Clear seating plan only** (keeps session & entries) |
+| `GET` | `/api/v1/plans/{id}/summary` | **Get branch-wise allocation breakdown & matrix** |
 | `PUT` | `/api/v1/plans/{id}/swap` | **Swap two seats with live constraint re-validation** |
-| `GET` | `/api/v1/plans/{id}/export/pdf` | **Download official Landscape A4 PDF** |
-| `GET` | `/api/v1/plans/{id}/export/excel` | **Download official Excel workbook** |
+| `GET` | `/api/v1/plans/{id}/export/pdf` | **Download official Landscape A4 PDF** (with branch summary) |
+| `GET` | `/api/v1/plans/{id}/export/excel` | **Download official Excel workbook** (with branch summary) |
 
 ---
 

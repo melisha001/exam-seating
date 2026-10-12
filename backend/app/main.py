@@ -22,8 +22,18 @@ from app.routers import rooms, departments, exam_sessions, exam_entries, plans
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Create DB tables before the app starts serving requests."""
+    """Create DB tables before the app starts serving requests and apply safe migrations."""
     Base.metadata.create_all(bind=engine)
+    try:
+        with engine.begin() as conn:
+            result = conn.exec_driver_sql("PRAGMA table_info(exam_entries)")
+            cols = {row[1] for row in result.fetchall()}
+            if "subject_code" not in cols:
+                conn.exec_driver_sql("ALTER TABLE exam_entries ADD COLUMN subject_code VARCHAR(50)")
+            if "exclusions" not in cols:
+                conn.exec_driver_sql("ALTER TABLE exam_entries ADD COLUMN exclusions TEXT")
+    except Exception:
+        pass
     yield
 
 

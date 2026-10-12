@@ -9,12 +9,16 @@ from app.schemas.exam_entry import ExamEntryCreate, ExamEntryUpdate
 
 
 def get_entries(
-    db: Session, session_id: int | None = None, skip: int = 0, limit: int = 200
+    db: Session, session_id: int | None = None, skip: int = 0, limit: int | None = None
 ) -> list[ExamEntry]:
     q = db.query(ExamEntry)
     if session_id is not None:
         q = q.filter(ExamEntry.session_id == session_id)
-    return q.offset(skip).limit(limit).all()
+    if skip > 0:
+        q = q.offset(skip)
+    if limit is not None:
+        q = q.limit(limit)
+    return q.all()
 
 
 def get_entry(db: Session, entry_id: int) -> ExamEntry | None:

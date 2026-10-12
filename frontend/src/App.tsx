@@ -175,6 +175,8 @@ export function App() {
                 currentPlan={currentPlan}
                 onStartWizard={() => setActiveTab('wizard')}
                 onSelectSession={handleSelectSessionFromDashboard}
+                onRefreshData={loadInitialData}
+                showToast={showToast}
               />
             )}
 

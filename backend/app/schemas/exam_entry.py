@@ -9,15 +9,17 @@ class ExamEntryBase(BaseModel):
     session_id: int
     department_id: int
     subject: str = Field(..., min_length=1, max_length=200, examples=["Data Structures"])
+    subject_code: str | None = Field(None, max_length=50, examples=["CS3301"])
     student_count: int = Field(..., gt=0, examples=[60])
     roll_start: str | None = Field(None, max_length=50, examples=["21CSE001"])
     roll_end: str | None = Field(None, max_length=50, examples=["21CSE060"])
+    exclusions: str | None = Field(None, description="Comma-separated roll numbers excluded (absentees)")
 
     @model_validator(mode="after")
     def check_roll_range(self) -> "ExamEntryBase":
         """Both roll_start and roll_end must be provided together, or neither."""
-        has_start = self.roll_start is not None
-        has_end = self.roll_end is not None
+        has_start = self.roll_start is not None and bool(self.roll_start.strip())
+        has_end = self.roll_end is not None and bool(self.roll_end.strip())
         if has_start != has_end:
             raise ValueError(
                 "Provide both roll_start and roll_end, or neither."
@@ -31,9 +33,11 @@ class ExamEntryCreate(ExamEntryBase):
 
 class ExamEntryUpdate(BaseModel):
     subject: str | None = Field(None, min_length=1, max_length=200)
+    subject_code: str | None = Field(None, max_length=50)
     student_count: int | None = Field(None, gt=0)
     roll_start: str | None = None
     roll_end: str | None = None
+    exclusions: str | None = None
 
 
 class ExamEntryRead(ExamEntryBase):

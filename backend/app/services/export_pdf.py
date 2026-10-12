@@ -147,6 +147,40 @@ def generate_pdf(
         ))
         story.append(Spacer(1, 8 * mm))
 
+    # ── Branch-wise Allocation Summary Page ──────────────────────────────────
+    story.append(Spacer(1, 10 * mm))
+    story.append(Paragraph("Branch-Wise Seating Allocation Summary", heading))
+    story.append(Spacer(1, 3 * mm))
+
+    summary_rows = [["Department", "Subject", "Hall", "Roll Range", "Candidates"]]
+    for r in rooms:
+        if not r:
+            continue
+        r_seats = seats_by_room.get(r.id, [])
+        dept_ids = sorted(list({s.department_id for s in r_seats if not s.is_empty and s.department_id}))
+        for d_id in dept_ids:
+            dept_seats = [s for s in r_seats if s.department_id == d_id and not s.is_empty]
+            dept_seats.sort(key=lambda s: (s.row, s.col, s.seat_index))
+            d_code = dept_seats[0].department.code if (dept_seats[0].department) else f"Dept {d_id}"
+            subj = dept_seats[0].subject or "Exam"
+            rolls = [s.roll_number for s in dept_seats if s.roll_number]
+            r_range = f"{rolls[0]} - {rolls[-1]}" if len(rolls) > 1 else (rolls[0] if rolls else "-")
+            summary_rows.append([d_code, subj, r.name, r_range, str(len(rolls))])
+
+    if len(summary_rows) > 1:
+        sum_table = Table(summary_rows, colWidths=[3 * cm, 6 * cm, 4 * cm, 7 * cm, 2.5 * cm])
+        sum_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E293B")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ALIGN", (4, 0), (4, -1), "CENTER"),
+        ]))
+        story.append(sum_table)
+        story.append(Spacer(1, 8 * mm))
+
     # ── Warnings page ─────────────────────────────────────────────────────────
     if plan.warnings:
         story.append(Paragraph("Warnings / Notes", heading))

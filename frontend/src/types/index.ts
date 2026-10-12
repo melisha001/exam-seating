@@ -25,9 +25,11 @@ export interface ExamEntry {
   session_id: number;
   department_id: number;
   subject: string;
+  subject_code?: string | null;
   student_count: number;
   roll_start: string | null;
   roll_end: string | null;
+  exclusions?: string | null;
 }
 
 export interface SeatAssignment {
@@ -72,4 +74,60 @@ export interface GeneratePlanRequest {
 export interface SwapRequest {
   seat_id_a: number;
   seat_id_b: number;
+}
+
+export interface BranchHallAllocation {
+  room_id: number;
+  room_name: string;
+  count: number;
+  roll_numbers: string[];
+  roll_ranges: string[];
+  seat_labels: string[];
+}
+
+export interface BranchSummaryItem {
+  department_id: number;
+  department_code: string;
+  department_name: string;
+  total_students: number;
+  halls: BranchHallAllocation[];
+}
+
+export interface HallBranchItem {
+  department_id: number;
+  department_code: string;
+  department_name: string;
+  count: number;
+}
+
+export interface HallSummaryItem {
+  room_id: number;
+  room_name: string;
+  invigilator_name: string | null;
+  capacity: number;
+  assigned: number;
+  branches: HallBranchItem[];
+}
+
+export interface MatrixCell {
+  room_id: number;
+  count: number;
+}
+
+export interface PlanBranchSummaryResponse {
+  plan_id: number;
+  session_id: number;
+  total_assigned: number;
+  departments: BranchSummaryItem[];
+  halls: HallSummaryItem[];
+  matrix: {
+    rooms: { id: number; name: string }[];
+    rows: {
+      department_id: number;
+      department_code: string;
+      department_name: string;
+      total: number;
+      room_counts: Record<string, number>;
+    }[];
+  };
 }

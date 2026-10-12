@@ -84,12 +84,16 @@ export const api = {
     });
     return handleResponse<ExamSession>(res);
   },
+  deleteSession: async (id: number): Promise<void> => {
+    const res = await fetch(`${API_BASE}/sessions/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete session');
+  },
 
   // Entries
   getEntries: async (sessionId?: number): Promise<ExamEntry[]> => {
     const url = sessionId
-      ? `${API_BASE}/entries/?session_id=${sessionId}`
-      : `${API_BASE}/entries/`;
+      ? `${API_BASE}/entries/?session_id=${sessionId}&limit=500`
+      : `${API_BASE}/entries/?limit=500`;
     const res = await fetch(url);
     return handleResponse<ExamEntry[]>(res);
   },
@@ -100,6 +104,18 @@ export const api = {
       body: JSON.stringify(data),
     });
     return handleResponse<ExamEntry>(res);
+  },
+  updateEntry: async (id: number, data: Partial<Omit<ExamEntry, 'id'>>): Promise<ExamEntry> => {
+    const res = await fetch(`${API_BASE}/entries/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return handleResponse<ExamEntry>(res);
+  },
+  deleteEntry: async (id: number): Promise<void> => {
+    const res = await fetch(`${API_BASE}/entries/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete entry');
   },
 
   // Plans
@@ -114,6 +130,14 @@ export const api = {
   getPlanBySession: async (sessionId: number): Promise<PlanDetail> => {
     const res = await fetch(`${API_BASE}/plans/session/${sessionId}`);
     return handleResponse<PlanDetail>(res);
+  },
+  deletePlanBySession: async (sessionId: number): Promise<{ message: string; deleted_plan_id: number }> => {
+    const res = await fetch(`${API_BASE}/plans/session/${sessionId}`, { method: 'DELETE' });
+    return handleResponse<{ message: string; deleted_plan_id: number }>(res);
+  },
+  getPlanSummary: async (planId: number): Promise<import('../types').PlanBranchSummaryResponse> => {
+    const res = await fetch(`${API_BASE}/plans/${planId}/summary`);
+    return handleResponse<import('../types').PlanBranchSummaryResponse>(res);
   },
   swapSeats: async (planId: number, data: SwapRequest): Promise<{ message: string }> => {
     const res = await fetch(`${API_BASE}/plans/${planId}/swap`, {

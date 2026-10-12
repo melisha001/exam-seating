@@ -1,5 +1,5 @@
 """
-schemas/plan_request.py — Request/response schemas for plan generation and swap.
+schemas/plan_request.py — Request/response schemas for plan generation, swap, and branch-wise summary.
 """
 
 from pydantic import BaseModel, Field
@@ -50,3 +50,60 @@ class RoomGrid(BaseModel):
 class PlanDetail(PlanSummary):
     """Full plan with per-room grids."""
     rooms: list[RoomGrid]
+
+
+# ── Branch-wise (Department-wise) Summary Schemas ─────────────────────────────
+
+class BranchHallAllocation(BaseModel):
+    room_id: int
+    room_name: str
+    invigilator_name: str | None
+    student_count: int
+    roll_range: str
+    roll_numbers: list[str]
+    seats: list[str]
+
+
+class BranchSummaryItem(BaseModel):
+    department_id: int
+    department_code: str
+    department_name: str
+    subject: str
+    total_students: int
+    halls: list[BranchHallAllocation]
+
+
+class HallBranchItem(BaseModel):
+    department_id: int
+    department_code: str
+    department_name: str
+    student_count: int
+    roll_range: str
+
+
+class HallSummaryItem(BaseModel):
+    room_id: int
+    room_name: str
+    invigilator_name: str | None
+    capacity: int
+    total_seated: int
+    utilization_pct: float
+    branches: list[HallBranchItem]
+
+
+class MatrixCell(BaseModel):
+    student_count: int
+    roll_range: str
+
+
+class PlanBranchSummaryResponse(BaseModel):
+    plan_id: int
+    session_id: int
+    total_assigned: int
+    unseated_count: int
+    warnings: list[str]
+    departments: list[BranchSummaryItem]
+    halls: list[HallSummaryItem]
+    department_codes: list[str]
+    room_names: list[str]
+    matrix: dict[str, dict[str, MatrixCell]]

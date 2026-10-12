@@ -25,6 +25,8 @@ import app.crud.exam_entries as entry_crud
 import app.crud.rooms as room_crud
 import app.crud.seating_plans as plan_crud
 
+import app.crud.departments as dept_crud
+
 from app.algorithm.seating import generate_seating
 from app.algorithm.roll_numbers import generate_rolls
 from app.algorithm.models import DeptGroup, RoomSpec
@@ -34,7 +36,17 @@ from app.services.export_pdf import generate_pdf
 from app.services.export_excel import generate_excel
 
 from app.schemas.plan_request import (
-    GeneratePlanRequest, SwapRequest, PlanSummary, PlanDetail, RoomGrid
+    GeneratePlanRequest,
+    SwapRequest,
+    PlanSummary,
+    PlanDetail,
+    RoomGrid,
+    PlanBranchSummaryResponse,
+    BranchSummaryItem,
+    BranchHallAllocation,
+    HallSummaryItem,
+    HallBranchItem,
+    MatrixCell,
 )
 
 router = APIRouter(prefix="/plans", tags=["Seating Plans"])
@@ -230,16 +242,23 @@ def generate_plan(body: GeneratePlanRequest, db: Session = Depends(get_db)):
     # Build algorithm inputs
     dept_groups: list[DeptGroup] = []
     for entry in entries:
+        exclusions_list = (
+            [x.strip() for x in entry.exclusions.split(",") if x.strip()]
+            if entry.exclusions
+            else None
+        )
         rolls = generate_rolls(
             entry.department.code,
             entry.student_count,
             entry.roll_start,
             entry.roll_end,
+            exclusions=exclusions_list,
         )
+        subj_label = f"{entry.subject_code} - {entry.subject}" if entry.subject_code else entry.subject
         dept_groups.append(DeptGroup(
             dept_id=entry.department_id,
             dept_code=entry.department.code,
-            subject=entry.subject,
+            subject=subj_label,
             rolls=rolls,
         ))
 
@@ -382,3 +401,162 @@ def export_excel(plan_id: int, db: Session = Depends(get_db)):
             "Content-Disposition": f'attachment; filename="seating_plan_{plan_id}.xlsx"'
         },
     )
+
+
+# ── Branch-wise Summary & Session Plan Cleanup ────────────────────────────────
+
+def _build_branch_summary(plan: SeatingPlan, db: Session) -> PlanBranchSummaryResponse:
+    all_seats = plan_crud.get_seats_for_plan(db, plan.id)
+    departments = dept_crud.get_departments(db)
+    dept_map = {d.id: d for d in departments}
+
+    room_ids_ordered: list[int] = []
+    seats_by_room: dict[int, list[SeatAssignment]] = {}
+    for seat in all_seats:
+        if seat.room_id not in seats_by_room:
+            room_ids_ordered.append(seat.room_id)
+            seats_by_room[seat.room_id] = []
+        seats_by_room[seat.room_id].append(seat)
+
+    room_map = {rid: room_crud.get_room(db, rid) for rid in room_ids_ordered}
+
+    # Group seated non-empty seats by (dept_id, room_id)
+    dept_room_seats: dict[int, dict[int, list[SeatAssignment]]] = {}
+    for seat in all_seats:
+        if not seat.is_empty and seat.department_id:
+            dept_room_seats.setdefault(seat.department_id, {}).setdefault(seat.room_id, []).append(seat)
+
+    entries = entry_crud.get_entries(db, session_id=plan.session_id)
+    dept_subject_map = {
+        e.department_id: (f"{e.subject_code} - {e.subject}" if e.subject_code else e.subject)
+        for e in entries
+    }
+
+    branch_items: list[BranchSummaryItem] = []
+    matrix_data: dict[str, dict[str, MatrixCell]] = {}
+    department_codes: list[str] = []
+
+    for dept in departments:
+        if dept.id not in dept_room_seats:
+            continue
+        department_codes.append(dept.code)
+        matrix_data[dept.code] = {}
+
+        total_dept_students = 0
+        halls_alloc: list[BranchHallAllocation] = []
+        subj = dept_subject_map.get(dept.id, "Exam")
+
+        for rid in room_ids_ordered:
+            rm = room_map.get(rid)
+            rm_name = rm.name if rm else f"Room {rid}"
+            st_list = dept_room_seats[dept.id].get(rid, [])
+
+            st_list.sort(key=lambda s: (s.row, s.col, s.seat_index))
+            rolls = [s.roll_number for s in st_list if s.roll_number]
+            count = len(rolls)
+            total_dept_students += count
+
+            if count > 1:
+                r_range = f"{rolls[0]} - {rolls[-1]}"
+            elif count == 1:
+                r_range = rolls[0]
+            else:
+                r_range = "-"
+
+            matrix_data[dept.code][rm_name] = MatrixCell(student_count=count, roll_range=r_range)
+
+            if count > 0:
+                halls_alloc.append(BranchHallAllocation(
+                    room_id=rid,
+                    room_name=rm_name,
+                    invigilator_name=rm.invigilator_name if rm else None,
+                    student_count=count,
+                    roll_range=r_range,
+                    roll_numbers=rolls,
+                    seats=[f"R{s.row+1}C{s.col+1}S{s.seat_index+1}" for s in st_list],
+                ))
+
+        branch_items.append(BranchSummaryItem(
+            department_id=dept.id,
+            department_code=dept.code,
+            department_name=dept.name,
+            subject=subj,
+            total_students=total_dept_students,
+            halls=halls_alloc,
+        ))
+
+    hall_items: list[HallSummaryItem] = []
+    room_names: list[str] = []
+
+    for rid in room_ids_ordered:
+        rm = room_map.get(rid)
+        if not rm:
+            continue
+        room_names.append(rm.name)
+        rm_seats = seats_by_room.get(rid, [])
+        assigned = sum(1 for s in rm_seats if not s.is_empty)
+        cap = rm.capacity
+        util = round(assigned / cap * 100, 1) if cap > 0 else 0.0
+
+        b_items: list[HallBranchItem] = []
+        for dept in departments:
+            st_list = dept_room_seats.get(dept.id, {}).get(rid, [])
+            if st_list:
+                st_list.sort(key=lambda s: (s.row, s.col, s.seat_index))
+                rolls = [s.roll_number for s in st_list if s.roll_number]
+                r_range = f"{rolls[0]} - {rolls[-1]}" if len(rolls) > 1 else (rolls[0] if rolls else "-")
+                b_items.append(HallBranchItem(
+                    department_id=dept.id,
+                    department_code=dept.code,
+                    department_name=dept.name,
+                    student_count=len(rolls),
+                    roll_range=r_range,
+                ))
+
+        hall_items.append(HallSummaryItem(
+            room_id=rid,
+            room_name=rm.name,
+            invigilator_name=rm.invigilator_name,
+            capacity=cap,
+            total_seated=assigned,
+            utilization_pct=util,
+            branches=b_items,
+        ))
+
+    total_assigned = sum(b.total_students for b in branch_items)
+
+    return PlanBranchSummaryResponse(
+        plan_id=plan.id,
+        session_id=plan.session_id,
+        total_assigned=total_assigned,
+        unseated_count=plan.unseated_count,
+        warnings=plan.warnings,
+        departments=branch_items,
+        halls=hall_items,
+        department_codes=department_codes,
+        room_names=room_names,
+        matrix=matrix_data,
+    )
+
+
+@router.get("/{plan_id}/summary", response_model=PlanBranchSummaryResponse)
+def get_plan_branch_summary(plan_id: int, db: Session = Depends(get_db)):
+    """Retrieve branch-wise and hall-wise allocation summary for a plan."""
+    plan = _plan_or_404(db, plan_id)
+    return _build_branch_summary(plan, db)
+
+
+@router.delete("/session/{session_id}", response_model=dict)
+def clear_plan_for_session(session_id: int, db: Session = Depends(get_db)):
+    """Clear seating plan only for a session, keeping session and exam entries intact."""
+    session = session_crud.get_session(db, session_id)
+    if not session:
+        raise HTTPException(404, f"Session {session_id} not found.")
+
+    plan = plan_crud.get_plan_by_session(db, session_id)
+    if not plan:
+        return {"message": f"No seating plan exists for session {session_id}."}
+
+    plan_crud.delete_plan(db, plan)
+    return {"message": f"Seating plan for session {session_id} cleared successfully."}
+

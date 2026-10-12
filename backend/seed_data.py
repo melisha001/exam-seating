@@ -42,10 +42,12 @@ def seed_database():
     try:
         print("[+] Seeding Exam Seating Arrangement System...")
 
-        # ── 1. Seed 4 Departments ─────────────────────────────────────────────
+        # ── 1. Seed 6 Academic Departments (5+ Departments) ─────────────────
         dept_data = [
             ("Computer Science and Engineering", "CSE"),
+            ("Information Technology", "IT"),
             ("Electronics and Communication Engineering", "ECE"),
+            ("Electrical and Electronics Engineering", "EEE"),
             ("Mechanical Engineering", "MECH"),
             ("Civil Engineering", "CIVIL"),
         ]
@@ -106,14 +108,16 @@ def seed_database():
         else:
             print(f"  * Session already exists: {session_date} ({session_label})")
 
-        # ── 4. Seed 4 Exam Entries ────────────────────────────────────────────
+        # ── 4. Seed 5+ Exam Entries ───────────────────────────────────────────
         entries_data = [
-            ("CSE", "Data Structures & Algorithms", 45, "21CSE001", "21CSE045"),
-            ("ECE", "Signals and Systems", 40, "21ECE001", "21ECE040"),
-            ("MECH", "Thermodynamics", 35, "21MECH001", "21MECH035"),
-            ("CIVIL", "Structural Engineering", 30, "21CIVIL001", "21CIVIL030"),
+            ("CSE", "CS8492", "Database Management Systems", 40, "927623BCS001", "927623BCS040", "927623BCS015"),
+            ("IT", "IT8401", "Web Technologies", 35, "927623BIT001", "927623BIT035", None),
+            ("ECE", "EC8451", "Electromagnetic Fields", 35, "927623BEC001", "927623BEC035", None),
+            ("EEE", "EE8402", "Linear Integrated Circuits", 30, "927623BEE001", "927623BEE030", None),
+            ("MECH", "ME8491", "Kinematics of Machinery", 30, "927623BME001", "927623BME030", "927623BME010"),
+            ("CIVIL", "CE8403", "Applied Hydraulic Engineering", 25, "927623BCE001", "927623BCE025", None),
         ]
-        for dept_code, subj, count, rs, re in entries_data:
+        for dept_code, sub_code, subj, count, rs, re, excl in entries_data:
             dept = dept_objs[dept_code]
             existing_entry = (
                 db.query(ExamEntry)
@@ -129,9 +133,11 @@ def seed_database():
                     session_id=session.id,
                     department_id=dept.id,
                     subject=subj,
+                    subject_code=sub_code,
                     student_count=count,
                     roll_start=rs,
                     roll_end=re,
+                    exclusions=excl,
                 )
                 db.add(entry)
                 print(f"  + Added Entry: {dept_code} - {subj} ({count} candidates)")
@@ -150,11 +156,13 @@ def seed_database():
 
         dept_groups = []
         for e in all_entries:
+            excl_list = [x.strip() for x in e.exclusions.split(",") if x.strip()] if e.exclusions else None
             rolls = generate_rolls(
                 e.department.code,
                 e.student_count,
                 e.roll_start,
                 e.roll_end,
+                exclusions=excl_list,
             )
             dept_groups.append(
                 DeptGroup(
@@ -174,7 +182,7 @@ def seed_database():
                 seats_per_bench=r.seats_per_bench,
                 invigilator_name=r.invigilator_name,
             )
-            for r in room_objs[:3]  # Use first 3 halls (Hall A, B, C = 196 capacity > 150 candidates)
+            for r in room_objs[:4]  # Use first 4 halls (Hall A, B, C, D = 256 capacity > 195 candidates)
         ]
 
         result = generate_seating(dept_groups, room_specs, check_front_back=True)

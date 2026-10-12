@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Building2,
   Users,
@@ -10,9 +10,12 @@ import {
   AlertCircle,
   FileSpreadsheet,
   FileText,
+  Trash2,
+  RotateCcw,
 } from 'lucide-react';
 import { Room, Department, ExamSession, ExamEntry, PlanDetail } from '../types';
 import { getDeptColor } from '../lib/utils';
+import { api } from '../services/api';
 
 interface DashboardProps {
   rooms: Room[];
@@ -22,6 +25,8 @@ interface DashboardProps {
   currentPlan: PlanDetail | null;
   onStartWizard: () => void;
   onSelectSession: (sessionId: number) => void;
+  onRefreshData?: () => Promise<void>;
+  showToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -32,7 +37,42 @@ export const Dashboard: React.FC<DashboardProps> = ({
   currentPlan,
   onStartWizard,
   onSelectSession,
+  onRefreshData,
+  showToast,
 }) => {
+  const [sessionToDelete, setSessionToDelete] = useState<ExamSession | null>(null);
+  const [sessionToClearPlan, setSessionToClearPlan] = useState<ExamSession | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
+
+  const handleDeleteSession = async () => {
+    if (!sessionToDelete) return;
+    try {
+      setIsDeleting(true);
+      await api.deleteSession(sessionToDelete.id);
+      showToast?.(`Deleted exam session ${sessionToDelete.date} (${sessionToDelete.label}) and associated data`, 'success');
+      setSessionToDelete(null);
+      await onRefreshData?.();
+    } catch (err: any) {
+      showToast?.(err.message || 'Failed to delete session', 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleClearPlan = async () => {
+    if (!sessionToClearPlan) return;
+    try {
+      setIsDeleting(true);
+      await api.deletePlanBySession(sessionToClearPlan.id);
+      showToast?.(`Cleared seating plan for session ${sessionToClearPlan.date} (${sessionToClearPlan.label})`, 'success');
+      setSessionToClearPlan(null);
+      await onRefreshData?.();
+    } catch (err: any) {
+      showToast?.(err.message || 'Failed to clear seating plan', 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
   const totalCapacity = rooms.reduce((acc, r) => acc + r.capacity, 0);
   const totalStudents = entries.reduce((acc, e) => acc + e.student_count, 0);
 
@@ -204,12 +244,32 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
                       <button
+                        type="button"
                         onClick={() => onSelectSession(sess.id)}
                         className="flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg bg-secondary text-secondary-foreground text-xs font-medium hover:bg-secondary/80 transition-colors"
                       >
                         Load / Plan
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSessionToClearPlan(sess)}
+                        className="px-2.5 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted text-xs font-medium transition-colors inline-flex items-center gap-1"
+                        title="Clear seating plan only (keeps exam session and departments)"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5 text-amber-500" />
+                        <span className="hidden sm:inline">Clear Plan</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSessionToDelete(sess)}
+                        className="p-1.5 rounded-lg border border-border hover:border-rose-500/40 text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 text-xs transition-colors"
+                        title="Delete entire session and registered entries"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>
@@ -262,6 +322,86 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Delete Session Confirmation Modal */}
+      {sessionToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-card border border-border rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-rose-500">
+              <div className="p-2 rounded-xl bg-rose-500/10">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <h4 className="font-bold text-base text-foreground">
+                Delete Exam Session?
+              </h4>
+            </div>
+
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Are you sure you want to delete session <strong className="text-foreground">{sessionToDelete.date} ({sessionToDelete.label})</strong>?
+              This will permanently delete the session, all registered exam entries, and any generated seating plans.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setSessionToDelete(null)}
+                className="px-4 py-2 rounded-xl border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleDeleteSession}
+                className="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold hover:bg-rose-700 transition-colors shadow-xs"
+              >
+                {isDeleting ? 'Deleting...' : 'Delete Everything'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clear Seating Plan Confirmation Modal */}
+      {sessionToClearPlan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-card border border-border rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-amber-500">
+              <div className="p-2 rounded-xl bg-amber-500/10">
+                <RotateCcw className="w-5 h-5" />
+              </div>
+              <h4 className="font-bold text-base text-foreground">
+                Clear Seating Plan Only?
+              </h4>
+            </div>
+
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              This will reset the generated seat allocations for <strong className="text-foreground">{sessionToClearPlan.date} ({sessionToClearPlan.label})</strong>.
+              Your registered departments and roll number configurations will be preserved so you can regenerate anytime.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setSessionToClearPlan(null)}
+                className="px-4 py-2 rounded-xl border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleClearPlan}
+                className="px-4 py-2 rounded-xl bg-amber-600 text-white text-xs font-bold hover:bg-amber-700 transition-colors shadow-xs"
+              >
+                {isDeleting ? 'Clearing...' : 'Clear Plan Only'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

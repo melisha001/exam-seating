@@ -6,7 +6,7 @@ which subject, how many students, and an optional roll-number range
 for ordered assignment.
 """
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, String
+from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -25,11 +25,15 @@ class ExamEntry(Base):
     )
 
     subject: Mapped[str] = mapped_column(String(200), nullable=False)
+    subject_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     student_count: Mapped[int] = mapped_column(Integer, nullable=False)
 
-    # Optional: alphanumeric roll-number range (e.g. "21CSE001" – "21CSE060")
+    # Optional: alphanumeric roll-number range (e.g. "927623BCS001" – "927623BCS060")
     roll_start: Mapped[str | None] = mapped_column(String(50), nullable=True)
     roll_end: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    # Optional: comma/space-separated excluded register numbers (absentees)
+    exclusions: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         CheckConstraint("student_count > 0", name="ck_entry_student_count_positive"),

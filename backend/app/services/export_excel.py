@@ -176,6 +176,42 @@ def generate_excel(
         else:
             cell.font = Font(color="6B7280", size=9)
 
+    # ── Branch Summary sheet ──────────────────────────────────────────────────
+    ws_branch = wb.create_sheet(title="Branch Summary", index=1)
+    ws_branch.column_dimensions["A"].width = 16
+    ws_branch.column_dimensions["B"].width = 28
+    ws_branch.column_dimensions["C"].width = 18
+    ws_branch.column_dimensions["D"].width = 24
+    ws_branch.column_dimensions["E"].width = 16
+
+    b_headers = ["Department", "Subject", "Hall", "Roll Range", "Candidate Count"]
+    for ci, h in enumerate(b_headers, 1):
+        c = ws_branch.cell(1, ci, h)
+        c.font = Font(bold=True, color=_HEADER_FONT_COLOR)
+        c.fill = _make_fill(_HEADER_FILL)
+        c.alignment = Alignment(horizontal="center")
+
+    b_row = 2
+    for r in rooms:
+        if not r:
+            continue
+        r_seats = seats_by_room.get(r.id, [])
+        dept_ids = sorted(list({s.department_id for s in r_seats if not s.is_empty and s.department_id}))
+        for d_id in dept_ids:
+            dept_seats = [s for s in r_seats if s.department_id == d_id and not s.is_empty]
+            dept_seats.sort(key=lambda s: (s.row, s.col, s.seat_index))
+            d_code = dept_seats[0].department.code if (dept_seats[0].department) else f"Dept {d_id}"
+            subj = dept_seats[0].subject or "Exam"
+            rolls = [s.roll_number for s in dept_seats if s.roll_number]
+            r_range = f"{rolls[0]} - {rolls[-1]}" if len(rolls) > 1 else (rolls[0] if rolls else "-")
+
+            ws_branch.cell(b_row, 1, d_code).alignment = Alignment(horizontal="center")
+            ws_branch.cell(b_row, 2, subj)
+            ws_branch.cell(b_row, 3, r.name)
+            ws_branch.cell(b_row, 4, r_range).alignment = Alignment(horizontal="center")
+            ws_branch.cell(b_row, 5, len(rolls)).alignment = Alignment(horizontal="center")
+            b_row += 1
+
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()

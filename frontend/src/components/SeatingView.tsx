@@ -19,6 +19,7 @@ import { api } from '../services/api';
 import { RoomSelector } from './seating/RoomSelector';
 import { SeatingGrid } from './seating/SeatingGrid';
 import { StudentDetailDrawer } from './seating/StudentDetailDrawer';
+import { BranchView } from './seating/BranchView';
 
 interface SeatingViewProps {
   plan: PlanDetail | null;
@@ -33,6 +34,7 @@ export const SeatingView: React.FC<SeatingViewProps> = ({
   onRefreshPlan,
   showToast,
 }) => {
+  const [viewMode, setViewMode] = useState<'halls' | 'branches'>('halls');
   const [activeRoomId, setActiveRoomId] = useState<number>(() => {
     return plan?.rooms[0]?.room_id || 0;
   });
@@ -271,19 +273,57 @@ export const SeatingView: React.FC<SeatingViewProps> = ({
         </div>
       )}
 
-      {/* Main Two-Column Layout: Room Selector Sidebar (Left) & Room Seating View (Right) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column: Room Selector (3 cols on desktop) */}
-        <div className="lg:col-span-3 lg:sticky lg:top-20">
-          <RoomSelector
-            rooms={plan.rooms}
-            activeRoomId={activeRoom.room_id}
-            onSelectRoom={(rId) => {
-              setActiveRoomId(rId);
-              setDrawerSeat(null);
-            }}
-          />
+      {/* View Switcher Tabs (Hall Layout vs Branch View) */}
+      <div className="flex items-center justify-between border-b border-border pb-3">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setViewMode('halls')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              viewMode === 'halls'
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+            }`}
+          >
+            <Building2 className="w-4 h-4" />
+            Hall View ({plan.rooms.length} Halls)
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('branches')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              viewMode === 'branches'
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+            }`}
+          >
+            <Layers className="w-4 h-4" />
+            Branch-Wise Allocation View
+          </button>
         </div>
+
+        <div className="text-xs text-muted-foreground font-medium hidden sm:block">
+          Plan #{plan.plan_id} &bull; {plan.total_assigned} Total Seated
+        </div>
+      </div>
+
+      {viewMode === 'branches' ? (
+        <BranchView planId={plan.plan_id} showToast={showToast} />
+      ) : (
+        <>
+          {/* Main Two-Column Layout: Room Selector Sidebar (Left) & Room Seating View (Right) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Left Column: Room Selector (3 cols on desktop) */}
+            <div className="lg:col-span-3 lg:sticky lg:top-20">
+              <RoomSelector
+                rooms={plan.rooms}
+                activeRoomId={activeRoom.room_id}
+                onSelectRoom={(rId) => {
+                  setActiveRoomId(rId);
+                  setDrawerSeat(null);
+                }}
+              />
+            </div>
 
         {/* Right Column: Room Header & Seating Grid (9 cols on desktop) */}
         <div className="lg:col-span-9 space-y-5 min-w-0">
@@ -341,17 +381,19 @@ export const SeatingView: React.FC<SeatingViewProps> = ({
         </div>
       </div>
 
-      {/* Side Detail Drawer for Clicked Seat */}
-      <StudentDetailDrawer
-        seat={drawerSeat}
-        room={activeRoom}
-        dept={drawerSeat?.department_id ? deptMap.get(drawerSeat.department_id) : null}
-        onClose={() => setDrawerSeat(null)}
-        onStartSwap={(seat) => {
-          setSwapSourceSeat(seat);
-          showToast(`Seat selected for swap. Click any target seat on the grid.`, 'info');
-        }}
-      />
+          {/* Side Detail Drawer for Clicked Seat */}
+          <StudentDetailDrawer
+            seat={drawerSeat}
+            room={activeRoom}
+            dept={drawerSeat?.department_id ? deptMap.get(drawerSeat.department_id) : null}
+            onClose={() => setDrawerSeat(null)}
+            onStartSwap={(seat) => {
+              setSwapSourceSeat(seat);
+              showToast(`Seat selected for swap. Click any target seat on the grid.`, 'info');
+            }}
+          />
+        </>
+      )}
     </div>
   );
 };

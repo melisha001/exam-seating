@@ -39,7 +39,7 @@ def _validate_fks(db: Session, session_id: int, department_id: int) -> None:
 def list_entries(
     session_id: int | None = None,
     skip: int = 0,
-    limit: int = 200,
+    limit: int = 500,
     db: Session = Depends(get_db),
 ):
     """List entries, optionally filtered by session_id."""

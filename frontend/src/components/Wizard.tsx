@@ -45,15 +45,43 @@ export const Wizard: React.FC<WizardProps> = ({
   const [newLabel, setNewLabel] = useState<string>('FN');
   const [isCreatingSession, setIsCreatingSession] = useState<boolean>(false);
 
-  // Step 2 State: Entries (Departments, Subject, Student Count, Roll range)
+  // Step 2 State: Entries (Departments, Subject, Student Count, Roll range, Exclusions)
   const [entryDeptId, setEntryDeptId] = useState<number>(
     departments.length > 0 ? departments[0].id : 1
   );
   const [entrySubject, setEntrySubject] = useState<string>('');
+  const [entrySubjectCode, setEntrySubjectCode] = useState<string>('');
   const [entryCount, setEntryCount] = useState<number>(40);
   const [entryRollStart, setEntryRollStart] = useState<string>('');
   const [entryRollEnd, setEntryRollEnd] = useState<string>('');
+  const [entryExclusions, setEntryExclusions] = useState<string>('');
+  const [editingEntryId, setEditingEntryId] = useState<number | null>(null);
   const [isAddingEntry, setIsAddingEntry] = useState<boolean>(false);
+  const [showAddDeptModal, setShowAddDeptModal] = useState<boolean>(false);
+  const [newDeptCode, setNewDeptCode] = useState<string>('');
+  const [newDeptName, setNewDeptName] = useState<string>('');
+  const [isCreatingDept, setIsCreatingDept] = useState<boolean>(false);
+
+  // Auto-calculate student count when roll start, roll end, or exclusions change
+  React.useEffect(() => {
+    if (entryRollStart.trim() && entryRollEnd.trim()) {
+      const startMatch = entryRollStart.trim().match(/^(.*?)(\d+)$/);
+      const endMatch = entryRollEnd.trim().match(/^(.*?)(\d+)$/);
+      if (startMatch && endMatch && startMatch[1] === endMatch[1]) {
+        const sNum = parseInt(startMatch[2], 10);
+        const eNum = parseInt(endMatch[2], 10);
+        if (eNum >= sNum) {
+          const rawTotal = eNum - sNum + 1;
+          const exclCount = entryExclusions
+            .split(',')
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0).length;
+          const computed = Math.max(0, rawTotal - exclCount);
+          setEntryCount(computed);
+        }
+      }
+    }
+  }, [entryRollStart, entryRollEnd, entryExclusions]);
 
   // Step 3 State: Selected Rooms (ordered)
   const [selectedRoomIds, setSelectedRoomIds] = useState<number[]>(
@@ -92,8 +120,34 @@ export const Wizard: React.FC<WizardProps> = ({
     }
   };
 
-  // Handler: Add Entry
-  const handleAddEntry = async (e: React.FormEvent) => {
+  // Quick department create handler
+  const handleCreateDepartment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDeptCode.trim() || !newDeptName.trim()) {
+      showToast('Department code and name are required', 'error');
+      return;
+    }
+    try {
+      setIsCreatingDept(true);
+      const created = await api.createDepartment({
+        code: newDeptCode.trim().toUpperCase(),
+        name: newDeptName.trim(),
+      });
+      await onRefreshData();
+      setEntryDeptId(created.id);
+      setNewDeptCode('');
+      setNewDeptName('');
+      setShowAddDeptModal(false);
+      showToast(`Added department ${created.code}`, 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to add department', 'error');
+    } finally {
+      setIsCreatingDept(false);
+    }
+  };
+
+  // Handler: Save or Update Entry
+  const handleSaveEntry = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedSessionId) {
       showToast('Please select or create a session first', 'error');
@@ -103,26 +157,109 @@ export const Wizard: React.FC<WizardProps> = ({
       showToast('Please enter subject name', 'error');
       return;
     }
+
+    // Validation: Start & End prefix check & bounds
+    if (entryRollStart.trim() && entryRollEnd.trim()) {
+      const startMatch = entryRollStart.trim().match(/^(.*?)(\d+)$/);
+      const endMatch = entryRollEnd.trim().match(/^(.*?)(\d+)$/);
+      if (!startMatch || !endMatch) {
+        showToast('Roll numbers must end in digits (e.g. 927623BCS001)', 'error');
+        return;
+      }
+      if (startMatch[1] !== endMatch[1]) {
+        showToast(`Roll prefix mismatch: "${startMatch[1]}" vs "${endMatch[1]}"`, 'error');
+        return;
+      }
+      if (parseInt(endMatch[2], 10) < parseInt(startMatch[2], 10)) {
+        showToast('Roll end number cannot be less than Roll start number', 'error');
+        return;
+      }
+    }
+
+    if (entryCount <= 0) {
+      showToast('Candidate count must be greater than 0', 'error');
+      return;
+    }
+
     try {
       setIsAddingEntry(true);
-      await api.createEntry({
-        session_id: selectedSessionId,
-        department_id: entryDeptId,
-        subject: entrySubject.trim(),
-        student_count: Number(entryCount),
-        roll_start: entryRollStart.trim() || null,
-        roll_end: entryRollEnd.trim() || null,
-      });
+      if (editingEntryId) {
+        await api.updateEntry(editingEntryId, {
+          department_id: entryDeptId,
+          subject: entrySubject.trim(),
+          subject_code: entrySubjectCode.trim() || null,
+          student_count: Number(entryCount),
+          roll_start: entryRollStart.trim() || null,
+          roll_end: entryRollEnd.trim() || null,
+          exclusions: entryExclusions.trim() || null,
+        });
+        showToast('Department entry updated', 'success');
+        setEditingEntryId(null);
+      } else {
+        await api.createEntry({
+          session_id: selectedSessionId,
+          department_id: entryDeptId,
+          subject: entrySubject.trim(),
+          subject_code: entrySubjectCode.trim() || null,
+          student_count: Number(entryCount),
+          roll_start: entryRollStart.trim() || null,
+          roll_end: entryRollEnd.trim() || null,
+          exclusions: entryExclusions.trim() || null,
+        });
+        showToast('Department entry added', 'success');
+      }
       await onRefreshData();
+      // Reset form
       setEntrySubject('');
+      setEntrySubjectCode('');
       setEntryRollStart('');
       setEntryRollEnd('');
-      showToast('Department entry added', 'success');
+      setEntryExclusions('');
+      setEntryCount(40);
     } catch (err: any) {
-      showToast(err.message || 'Failed to add entry', 'error');
+      showToast(err.message || 'Failed to save entry', 'error');
     } finally {
       setIsAddingEntry(false);
     }
+  };
+
+  const handleEditEntry = (entry: ExamEntry) => {
+    setEditingEntryId(entry.id);
+    setEntryDeptId(entry.department_id);
+    setEntrySubject(entry.subject);
+    setEntrySubjectCode(entry.subject_code || '');
+    setEntryCount(entry.student_count);
+    setEntryRollStart(entry.roll_start || '');
+    setEntryRollEnd(entry.roll_end || '');
+    setEntryExclusions(entry.exclusions || '');
+  };
+
+  const handleDeleteEntry = async (id: number) => {
+    try {
+      await api.deleteEntry(id);
+      await onRefreshData();
+      if (editingEntryId === id) {
+        setEditingEntryId(null);
+        setEntrySubject('');
+        setEntrySubjectCode('');
+        setEntryRollStart('');
+        setEntryRollEnd('');
+        setEntryExclusions('');
+      }
+      showToast('Entry removed', 'info');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to delete entry', 'error');
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingEntryId(null);
+    setEntrySubject('');
+    setEntrySubjectCode('');
+    setEntryRollStart('');
+    setEntryRollEnd('');
+    setEntryExclusions('');
+    setEntryCount(40);
   };
 
   // Handler: Toggle Room Selection
@@ -339,76 +476,200 @@ export const Wizard: React.FC<WizardProps> = ({
         {/* STEP 2: Departments & Exam Entries */}
         {step === 2 && (
           <div className="space-y-6">
-            <div>
-              <h3 className="text-xl font-bold text-foreground">
-                Step 2: Add Department Exam Entries
-              </h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                Specify subjects and candidate counts for each department. Multiple departments are interleaved to prevent cheating.
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xl font-bold text-foreground">
+                  Step 2: Department Exam Registration
+                </h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Add all participating departments for this session. Interleaved allocation distributes students across halls to prevent cheating.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddDeptModal(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted text-xs font-semibold text-foreground transition-colors self-start sm:self-auto"
+              >
+                <Plus className="w-3.5 h-3.5 text-primary" />
+                + Add New Department
+              </button>
             </div>
 
-            {/* List existing entries for session */}
+            {/* Quick Add Department Modal / Popover */}
+            {showAddDeptModal && (
+              <div className="p-4 rounded-xl border border-primary/30 bg-primary/5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-primary uppercase tracking-wider">
+                    Create New Department
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddDeptModal(false)}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <input
+                    type="text"
+                    placeholder="Dept Code (e.g. MECH, CIVIL, AIDS)"
+                    value={newDeptCode}
+                    onChange={(e) => setNewDeptCode(e.target.value)}
+                    className="px-3 py-2 rounded-lg border border-input bg-background text-foreground text-xs focus:ring-2 focus:ring-primary"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Department Name (e.g. Mechanical Engineering)"
+                    value={newDeptName}
+                    onChange={(e) => setNewDeptName(e.target.value)}
+                    className="px-3 py-2 rounded-lg border border-input bg-background text-foreground text-xs focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    disabled={isCreatingDept}
+                    onClick={handleCreateDepartment}
+                    className="px-3.5 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors"
+                  >
+                    {isCreatingDept ? 'Saving...' : 'Save Department'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Repeatable Department Summary Table */}
             <div className="space-y-3">
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Current Registered Exams ({currentSessionEntries.length}) &bull; Total Candidates: {totalStudents}
-              </h4>
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Registered Departments ({currentSessionEntries.length}) &bull; Total Candidates: <span className="font-bold text-foreground">{totalStudents}</span>
+                </h4>
+              </div>
+
               {currentSessionEntries.length === 0 ? (
-                <div className="p-5 rounded-xl border border-dashed border-border text-center text-sm text-muted-foreground">
-                  No departments added yet for this session. Use the form below to add entries.
+                <div className="p-6 rounded-xl border border-dashed border-border text-center text-sm text-muted-foreground">
+                  No departments added yet for this session. Fill in the form below to register your first branch.
                 </div>
               ) : (
-                <div className="divide-y divide-border border border-border rounded-xl overflow-hidden bg-muted/10">
-                  {currentSessionEntries.map((entry) => {
-                    const dept = departments.find((d) => d.id === entry.department_id);
-                    return (
-                      <div
-                        key={entry.id}
-                        className="p-3.5 sm:p-4 flex items-center justify-between text-sm"
-                      >
-                        <div className="space-y-0.5">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-foreground">
-                              {dept?.code || `Dept #${entry.department_id}`}
-                            </span>
-                            <span className="text-muted-foreground">&bull;</span>
-                            <span className="text-foreground font-medium">
-                              {entry.subject}
-                            </span>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            {entry.student_count} candidates
-                            {entry.roll_start && entry.roll_end && (
-                              <span> ({entry.roll_start} &rarr; {entry.roll_end})</span>
-                            )}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
+                <div className="border border-border rounded-xl overflow-hidden bg-card">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-muted/50 border-b border-border text-muted-foreground font-semibold">
+                      <tr>
+                        <th className="py-2.5 px-3">Branch</th>
+                        <th className="py-2.5 px-3">Subject</th>
+                        <th className="py-2.5 px-3">Roll Range</th>
+                        <th className="py-2.5 px-3">Exclusions</th>
+                        <th className="py-2.5 px-3 text-right">Students</th>
+                        <th className="py-2.5 px-3 text-center">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {currentSessionEntries.map((entry) => {
+                        const dept = departments.find((d) => d.id === entry.department_id);
+                        const isEditing = editingEntryId === entry.id;
+                        return (
+                          <tr
+                            key={entry.id}
+                            className={`hover:bg-muted/30 transition-colors ${
+                              isEditing ? 'bg-primary/5 font-medium' : ''
+                            }`}
+                          >
+                            <td className="py-3 px-3">
+                              <span className="font-bold text-foreground">
+                                {dept?.code || `Dept #${entry.department_id}`}
+                              </span>
+                              <div className="text-[10px] text-muted-foreground">
+                                {dept?.name}
+                              </div>
+                            </td>
+                            <td className="py-3 px-3">
+                              <span className="font-medium text-foreground">{entry.subject}</span>
+                              {entry.subject_code && (
+                                <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono">
+                                  {entry.subject_code}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3 px-3 font-mono text-[11px]">
+                              {entry.roll_start && entry.roll_end ? (
+                                <span className="text-foreground">
+                                  {entry.roll_start} &rarr; {entry.roll_end}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground italic">Sequential auto-gen</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-3 font-mono text-[11px] max-w-[120px] truncate">
+                              {entry.exclusions ? (
+                                <span className="text-rose-500 font-medium" title={entry.exclusions}>
+                                  {entry.exclusions.split(',').length} absent ({entry.exclusions})
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground">&mdash;</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-3 text-right font-bold text-foreground text-sm">
+                              {entry.student_count}
+                            </td>
+                            <td className="py-3 px-3 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleEditEntry(entry)}
+                                  className="px-2 py-1 rounded hover:bg-muted text-xs text-foreground font-medium"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteEntry(entry.id)}
+                                  className="p-1 rounded hover:bg-rose-500/10 text-rose-500 transition-colors"
+                                  title="Remove entry"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
 
-            {/* Add Department Form */}
+            {/* Department Entry Form (Add / Edit) */}
             <form
-              onSubmit={handleAddEntry}
-              className="p-5 rounded-xl border border-border bg-card space-y-4"
+              onSubmit={handleSaveEntry}
+              className="p-5 rounded-2xl border border-border bg-card shadow-xs space-y-4"
             >
-              <h4 className="font-semibold text-sm text-foreground flex items-center gap-2">
-                <Plus className="w-4 h-4 text-primary" />
-                Add Department Exam Entry
-              </h4>
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-sm text-foreground flex items-center gap-2">
+                  <Plus className="w-4 h-4 text-primary" />
+                  {editingEntryId ? 'Edit Department Exam Entry' : 'Add Department / Subject'}
+                </h4>
+                {editingEntryId && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEdit}
+                    className="text-xs text-muted-foreground hover:text-foreground font-medium"
+                  >
+                    Cancel Edit
+                  </button>
+                )}
+              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div className="sm:col-span-2">
                   <label className="block text-xs font-semibold text-muted-foreground mb-1">
                     Department
                   </label>
                   <select
                     value={entryDeptId}
                     onChange={(e) => setEntryDeptId(Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-lg border border-input bg-background text-foreground text-sm focus:ring-2 focus:ring-primary"
+                    className="w-full px-3 py-2 rounded-lg border border-input bg-background text-foreground text-xs focus:ring-2 focus:ring-primary"
                   >
                     {departments.map((d) => (
                       <option key={d.id} value={d.id}>
@@ -426,15 +687,71 @@ export const Wizard: React.FC<WizardProps> = ({
                     type="text"
                     value={entrySubject}
                     onChange={(e) => setEntrySubject(e.target.value)}
-                    placeholder="e.g. Operating Systems"
+                    placeholder="e.g. Database Management"
                     required
-                    className="w-full px-3 py-2 rounded-lg border border-input bg-background text-foreground text-sm focus:ring-2 focus:ring-primary"
+                    className="w-full px-3 py-2 rounded-lg border border-input bg-background text-foreground text-xs focus:ring-2 focus:ring-primary"
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-muted-foreground mb-1">
-                    Student Count
+                    Subject Code (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={entrySubjectCode}
+                    onChange={(e) => setEntrySubjectCode(e.target.value)}
+                    placeholder="e.g. CS8492"
+                    className="w-full px-3 py-2 rounded-lg border border-input bg-background text-foreground text-xs focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+              </div>
+
+              {/* Roll range and student count row */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-1">
+                <div>
+                  <label className="block text-xs font-semibold text-muted-foreground mb-1">
+                    Start Roll Number
+                  </label>
+                  <input
+                    type="text"
+                    value={entryRollStart}
+                    onChange={(e) => setEntryRollStart(e.target.value)}
+                    placeholder="e.g. 927623BCS001"
+                    className="w-full px-3 py-2 rounded-lg border border-input bg-background text-foreground text-xs font-mono focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-muted-foreground mb-1">
+                    End Roll Number
+                  </label>
+                  <input
+                    type="text"
+                    value={entryRollEnd}
+                    onChange={(e) => setEntryRollEnd(e.target.value)}
+                    placeholder="e.g. 927623BCS060"
+                    className="w-full px-3 py-2 rounded-lg border border-input bg-background text-foreground text-xs font-mono focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-muted-foreground mb-1">
+                    Exclusions / Absentees
+                  </label>
+                  <input
+                    type="text"
+                    value={entryExclusions}
+                    onChange={(e) => setEntryExclusions(e.target.value)}
+                    placeholder="e.g. 927623BCS015, 927623BCS032"
+                    className="w-full px-3 py-2 rounded-lg border border-input bg-background text-foreground text-xs font-mono focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-muted-foreground mb-1 flex items-center justify-between">
+                    <span>Student Count</span>
+                    <span className="text-[10px] text-primary font-bold">Auto-calculated</span>
                   </label>
                   <input
                     type="number"
@@ -442,46 +759,29 @@ export const Wizard: React.FC<WizardProps> = ({
                     value={entryCount}
                     onChange={(e) => setEntryCount(Number(e.target.value))}
                     required
-                    className="w-full px-3 py-2 rounded-lg border border-input bg-background text-foreground text-sm focus:ring-2 focus:ring-primary"
+                    className="w-full px-3 py-2 rounded-lg border border-input bg-background text-foreground text-xs font-bold focus:ring-2 focus:ring-primary"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1">
-                    Optional Roll Start
-                  </label>
-                  <input
-                    type="text"
-                    value={entryRollStart}
-                    onChange={(e) => setEntryRollStart(e.target.value)}
-                    placeholder="e.g. 21CSE001"
-                    className="w-full px-3 py-2 rounded-lg border border-input bg-background text-foreground text-xs focus:ring-2 focus:ring-primary"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1">
-                    Optional Roll End
-                  </label>
-                  <input
-                    type="text"
-                    value={entryRollEnd}
-                    onChange={(e) => setEntryRollEnd(e.target.value)}
-                    placeholder="e.g. 21CSE060"
-                    className="w-full px-3 py-2 rounded-lg border border-input bg-background text-foreground text-xs focus:ring-2 focus:ring-primary"
-                  />
-                </div>
-              </div>
+              <div className="flex items-center justify-between pt-2">
+                <span className="text-[11px] text-muted-foreground">
+                  Tip: Provide Start &amp; End roll numbers to auto-calculate student counts and exclude absentees.
+                </span>
 
-              <button
-                type="submit"
-                disabled={isAddingEntry}
-                className="px-4 py-2 rounded-lg bg-secondary text-secondary-foreground text-xs font-semibold hover:bg-secondary/80 transition-colors flex items-center gap-1.5"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                {isAddingEntry ? 'Adding...' : 'Add This Department'}
-              </button>
+                <button
+                  type="submit"
+                  disabled={isAddingEntry}
+                  className="px-5 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 transition-all flex items-center gap-1.5 shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  {isAddingEntry
+                    ? 'Saving...'
+                    : editingEntryId
+                    ? 'Update Department'
+                    : 'Add This Department'}
+                </button>
+              </div>
             </form>
 
             <div className="flex justify-between pt-4">
@@ -496,7 +796,7 @@ export const Wizard: React.FC<WizardProps> = ({
                 onClick={() => setStep(3)}
                 className="px-6 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-all flex items-center gap-2 disabled:opacity-50"
               >
-                Next: Select Halls <ArrowRight className="w-4 h-4" />
+                Next: Select Halls ({currentSessionEntries.length} Depts) <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           </div>

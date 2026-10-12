@@ -56,17 +56,51 @@ export const SeatingGrid: React.FC<SeatingGridProps> = ({
   const handleZoomOut = () => setZoomLevel((z) => Math.max(70, z - 15));
   const handleResetZoom = () => setZoomLevel(100);
 
+  // Calculate department distribution for this room
+  const roomDeptCounts = useMemo(() => {
+    const counts = new Map<number, number>();
+    room.seats.forEach((s) => {
+      if (s.department_id) {
+        counts.set(s.department_id, (counts.get(s.department_id) || 0) + 1);
+      }
+    });
+    return Array.from(counts.entries()).map(([deptId, count]) => ({
+      dept: deptMap.get(deptId),
+      count,
+    }));
+  }, [room.seats, deptMap]);
+
   return (
     <div className="bg-card border border-border rounded-3xl p-5 sm:p-6 shadow-sm space-y-4 flex flex-col min-w-0">
       {/* Zoom and Grid Controls Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-border/80 text-xs">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="font-bold text-foreground">
             Hall Layout &amp; Bench Grid
           </span>
           <span className="text-muted-foreground text-[11px]">
             ({maxRow} Rows &times; {maxCol} Benches/Row)
           </span>
+
+          {/* Color-coded branch chips in hall header */}
+          <div className="flex items-center gap-1.5 ml-2 flex-wrap">
+            {roomDeptCounts.map(({ dept, count }) => {
+              if (!dept) return null;
+              return (
+                <span
+                  key={dept.id}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border border-border/80 bg-muted/60 text-foreground"
+                >
+                  <span
+                    className="w-1.5 h-1.5 rounded-full"
+                    style={{ backgroundColor: `hsl(${((dept.id * 53) % 360)}, 70%, 50%)` }}
+                  />
+                  <span>{dept.code}:</span>
+                  <span className="font-mono">{count}</span>
+                </span>
+              );
+            })}
+          </div>
         </div>
 
         {/* Zoom Controls */}

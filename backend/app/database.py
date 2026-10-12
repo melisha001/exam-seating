@@ -26,6 +26,25 @@ class Base(DeclarativeBase):
     pass
 
 
+def init_db_and_migrate():
+    """Ensure tables exist and apply backward-compatible column migrations for SQLite."""
+    Base.metadata.create_all(bind=engine)
+    if settings.database_url.startswith("sqlite"):
+        try:
+            with engine.begin() as conn:
+                result = conn.exec_driver_sql("PRAGMA table_info(exam_entries)")
+                cols = {row[1] for row in result.fetchall()}
+                if "subject_code" not in cols and cols:
+                    conn.exec_driver_sql("ALTER TABLE exam_entries ADD COLUMN subject_code VARCHAR(50)")
+                if "exclusions" not in cols and cols:
+                    conn.exec_driver_sql("ALTER TABLE exam_entries ADD COLUMN exclusions TEXT")
+        except Exception:
+            pass
+
+
+init_db_and_migrate()
+
+
 def get_db():
     """FastAPI dependency that yields a database session."""
     db = SessionLocal()
