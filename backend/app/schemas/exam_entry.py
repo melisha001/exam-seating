@@ -1,0 +1,42 @@
+"""
+schemas/exam_entry.py — Pydantic schemas for ExamEntry.
+"""
+
+from pydantic import BaseModel, Field, model_validator
+
+
+class ExamEntryBase(BaseModel):
+    session_id: int
+    department_id: int
+    subject: str = Field(..., min_length=1, max_length=200, examples=["Data Structures"])
+    student_count: int = Field(..., gt=0, examples=[60])
+    roll_start: str | None = Field(None, max_length=50, examples=["21CSE001"])
+    roll_end: str | None = Field(None, max_length=50, examples=["21CSE060"])
+
+    @model_validator(mode="after")
+    def check_roll_range(self) -> "ExamEntryBase":
+        """Both roll_start and roll_end must be provided together, or neither."""
+        has_start = self.roll_start is not None
+        has_end = self.roll_end is not None
+        if has_start != has_end:
+            raise ValueError(
+                "Provide both roll_start and roll_end, or neither."
+            )
+        return self
+
+
+class ExamEntryCreate(ExamEntryBase):
+    pass
+
+
+class ExamEntryUpdate(BaseModel):
+    subject: str | None = Field(None, min_length=1, max_length=200)
+    student_count: int | None = Field(None, gt=0)
+    roll_start: str | None = None
+    roll_end: str | None = None
+
+
+class ExamEntryRead(ExamEntryBase):
+    id: int
+
+    model_config = {"from_attributes": True}
