@@ -16,8 +16,13 @@ class SeatAssignmentRead(BaseModel):
     seat_index: int
     roll_number: str | None
     department_id: int | None
-    subject: str | None
-    is_empty: bool
+    subject: str | None = None
+    subject_code: str | None = None
+    is_empty: bool = False
+    is_arrear: bool = False
+    is_locked: bool = False
+    medium: str | None = "EN"
+    seat_label: str = ""
 
     model_config = {"from_attributes": True}
 

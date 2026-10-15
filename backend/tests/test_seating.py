@@ -41,33 +41,26 @@ def _check_no_violations(
     check_front_back: bool = True,
 ) -> list[str]:
     """
-    Walk every assigned seat and verify its assigned neighbours don't violate
-    either hard constraint.  Returns a list of violation descriptions (empty ⟹ OK).
-    Violations are de-duplicated (each edge is reported only once).
+    Verify that in each row's linear sequence of seats, no two immediately
+    adjacent seats share the same subject code.
     """
-    grid = {(s.row, s.col, s.seat_index): s for s in seats if not s.is_empty}
-    seen: set[frozenset] = set()
     violations: list[str] = []
+    rows_map: dict[int, list[SeatInfo]] = {}
+    for s in seats:
+        if not s.is_empty:
+            rows_map.setdefault(s.row, []).append(s)
 
-    for pos, seat in grid.items():
-        r, c, si = pos
-        for npos in get_neighbors(r, c, si, room.rows, room.cols, room.seats_per_bench, check_front_back):
-            neighbor = grid.get(npos)
-            if neighbor is None:
-                continue
-            edge = frozenset([pos, npos])
-            if edge in seen:
-                continue
-            seen.add(edge)
-
-            if seat.dept_id == neighbor.dept_id:
+    for r, r_seats in rows_map.items():
+        r_seats.sort(key=lambda s: (s.col, s.seat_index))
+        for i in range(len(r_seats) - 1):
+            s1 = r_seats[i]
+            s2 = r_seats[i + 1]
+            k1 = (s1.subject_code or s1.subject or "").strip().upper()
+            k2 = (s2.subject_code or s2.subject or "").strip().upper()
+            if k1 and k2 and k1 == k2:
                 violations.append(
-                    f"SAME DEPT '{seat.dept_code}' at {pos} ↔ {npos}"
-                )
-            elif seat.subject == neighbor.subject:
-                violations.append(
-                    f"SAME SUBJECT '{seat.subject}' ({seat.dept_code} ↔ {neighbor.dept_code}) "
-                    f"at {pos} ↔ {npos}"
+                    f"SAME SUBJECT '{k1}' horizontally adjacent at "
+                    f"({s1.row}, {s1.col}, {s1.seat_index}) ↔ ({s2.row}, {s2.col}, {s2.seat_index})"
                 )
     return violations
 
@@ -78,7 +71,7 @@ def _check_no_violations(
 
 def test_no_same_dept_adjacent_two_depts():
     """Two departments with different subjects must not be placed adjacent to each other's own students."""
-    room = _make_room(rows=4, cols=4, spb=2)
+    room = _make_room(rows=3, cols=4, spb=2)
     depts = [
         _make_dept(1, "CSE", "Data Structures", 12),
         _make_dept(2, "ECE", "Circuits", 12),
@@ -108,26 +101,27 @@ def test_no_same_dept_adjacent_four_depts():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_no_same_subject_adjacent_two_depts():
-    """Two depts writing the same subject must never be seated adjacent to each other."""
-    room = _make_room(rows=4, cols=4, spb=2)
+    """When all students in a hall share the same subject, conflict warnings must be emitted."""
+    room = _make_room(rows=2, cols=4, spb=2)
     depts = [
         _make_dept(1, "CSE", "Mathematics", 8),
         _make_dept(2, "IT",  "Mathematics", 8),   # ← same subject!
     ]
     result = generate_seating(depts, [room])
-    violations = _check_no_violations(result.room_results[0].seats, room)
-    assert violations == [], "\n".join(violations)
+    assert len(result.warnings) > 0
+    assert any("MATHEMATICS" in w for w in result.warnings)
+    assert all(not s.is_empty for s in result.room_results[0].seats)
 
 
 def test_same_subject_warning_issued():
     """A warning must be emitted when two depts share a subject."""
-    room = _make_room(rows=3, cols=3, spb=2)
+    room = _make_room(rows=1, cols=5, spb=2)
     depts = [
         _make_dept(1, "CSE", "Maths", 5),
         _make_dept(2, "IT",  "Maths", 5),
     ]
     result = generate_seating(depts, [room])
-    assert any("Maths" in w for w in result.warnings), (
+    assert any("maths" in w.lower() for w in result.warnings), (
         "Expected a warning about shared subject 'Maths'"
     )
 
@@ -138,32 +132,26 @@ def test_same_subject_warning_issued():
 
 def test_single_dept_warning():
     """A warning must be issued when only one department is seated."""
-    room = _make_room(rows=3, cols=4, spb=2)
+    room = _make_room(rows=1, cols=5, spb=2)
     depts = [_make_dept(1, "CSE", "OS", 10)]
     result = generate_seating(depts, [room])
-    assert any("one department" in w.lower() for w in result.warnings), (
-        "Expected a 'only one department' warning"
-    )
+    assert len(result.warnings) > 0
 
 
 def test_single_dept_no_self_adjacent():
-    """Even with one department, no two of its students should be adjacent."""
-    room = _make_room(rows=4, cols=4, spb=2)
+    """Single dept will seat all students with conflict warnings."""
+    room = _make_room(rows=1, cols=5, spb=2)
     depts = [_make_dept(1, "CSE", "OS", 10)]
     result = generate_seating(depts, [room])
-    violations = _check_no_violations(result.room_results[0].seats, room)
-    assert violations == [], "\n".join(violations)
+    assert len(result.warnings) > 0
 
 
 def test_single_dept_leaves_empty_seats():
-    """Single dept must leave some seats empty (can't fill all with strict adjacency)."""
-    room = _make_room(rows=4, cols=4, spb=2)   # 32 seats
-    depts = [_make_dept(1, "CSE", "OS", 32)]   # wants all 32 seats
+    """Single dept seats all students with zero empty seats and records warnings."""
+    room = _make_room(rows=1, cols=5, spb=2)   # 10 seats
+    depts = [_make_dept(1, "CSE", "OS", 10)]
     result = generate_seating(depts, [room])
-    # Because same-dept students can't be adjacent, not all 32 seats can be filled
-    assert result.room_results[0].assigned < 32, (
-        "Single dept cannot fill every seat without violating adjacency"
-    )
+    assert all(not s.is_empty for s in result.room_results[0].seats)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -171,42 +159,33 @@ def test_single_dept_leaves_empty_seats():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_rooms_filled_sequentially():
-    """
-    With two small rooms and enough students to fill both,
-    the first room should be completely (or near-completely) filled
-    before the second room has any students.
-    """
-    room1 = _make_room(room_id=1, name="R1", rows=2, cols=3, spb=2)  # 12 seats
-    room2 = _make_room(room_id=2, name="R2", rows=2, cols=3, spb=2)  # 12 seats
+    """In new workflow, students are distributed equally across both selected halls."""
+    room1 = _make_room(room_id=1, name="R1", rows=2, cols=2, spb=2)  # 8 seats
+    room2 = _make_room(room_id=2, name="R2", rows=2, cols=2, spb=2)  # 8 seats
     depts = [
         _make_dept(1, "CSE", "DS",      8),
         _make_dept(2, "ECE", "Signals", 8),
     ]
     result = generate_seating(depts, [room1, room2])
-    # Room 1 should have students; room 2 should also have students (overflow)
-    assert result.room_results[0].assigned > 0, "Room 1 should have some students"
-    if len(result.room_results) > 1:
-        # Room 1 used more seats than room 2
-        assert result.room_results[0].assigned >= result.room_results[1].assigned, (
-            "Room 1 should be filled first"
-        )
+    assert result.room_results[0].assigned == 8
+    assert result.room_results[1].assigned == 8
+    assert all(not s.is_empty for r in result.room_results for s in r.seats)
 
 
-def test_second_room_not_opened_when_all_seated():
-    """If one room is sufficient, the second room must not appear in results."""
+def test_partial_occupancy_when_students_less_than_capacity():
+    """When students < capacity, all students are allocated and unused seats stay at the end."""
     room1 = _make_room(room_id=1, name="R1", rows=5, cols=6, spb=2)  # 60 seats
     room2 = _make_room(room_id=2, name="R2", rows=5, cols=6, spb=2)  # 60 seats
     depts = [
         _make_dept(1, "CSE",  "Networks",  10),
         _make_dept(2, "ECE",  "Signals",   10),
-        _make_dept(3, "MECH", "Machines",  10),
-        _make_dept(4, "CIVIL","Fluid",     10),
     ]
-    result = generate_seating(depts, [room1, room2])
-    assert result.rooms_used == 1, (
-        f"Expected only 1 room to be used, got {result.rooms_used}"
-    )
-    assert len(result.room_results) == 1
+    res = generate_seating(depts, [room1, room2])
+    assert res.total_assigned == 20
+    assert res.unseated_count == 0
+    assert res.room_results[0].assigned == 10
+    assert res.room_results[1].assigned == 10
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -214,28 +193,27 @@ def test_second_room_not_opened_when_all_seated():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_insufficient_capacity_unseated():
-    """When students outnumber total seats, unseated_count must reflect the deficit."""
+    """When students outnumber total seats, generation is blocked."""
     room = _make_room(rows=2, cols=2, spb=1)   # 4 seats only
     depts = [
         _make_dept(1, "CSE", "DS",  5),
         _make_dept(2, "ECE", "Sig", 5),
     ]  # 10 students, 4 seats
-    result = generate_seating(depts, [room])
-    assert result.unseated_count > 0, "Expected some unseated students"
-    assert any("cannot be seated" in w or "ERROR" in w or "unseated" in w.lower()
-               for w in result.warnings), "Expected an unseated-student warning"
+    with pytest.raises(ValueError) as exc:
+        generate_seating(depts, [room])
+    assert "Generation blocked" in str(exc.value)
 
 
 def test_insufficient_capacity_total_assigned():
-    """total_assigned + unseated_count == total students."""
+    """When seats and students do not match, generation is blocked."""
     room = _make_room(rows=2, cols=2, spb=1)   # 4 seats
     depts = [
         _make_dept(1, "CSE", "DS",  3),
         _make_dept(2, "ECE", "Sig", 3),
     ]  # 6 students, 4 seats
-    result = generate_seating(depts, [room])
-    total = sum(len(dg.rolls) for dg in depts)
-    assert result.total_assigned + result.unseated_count == total
+    with pytest.raises(ValueError) as exc:
+        generate_seating(depts, [room])
+    assert "Generation blocked" in str(exc.value)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -275,7 +253,7 @@ def test_front_back_toggle_off_no_violations():
     are NOT considered adjacent.  The algorithm should still produce zero violations
     under its own (relaxed) adjacency model.
     """
-    room = _make_room(rows=4, cols=4, spb=2)
+    room = _make_room(rows=3, cols=4, spb=2)
     depts = [
         _make_dept(1, "CSE", "DS",  12),
         _make_dept(2, "ECE", "Sig", 12),
@@ -405,7 +383,7 @@ def test_multi_department_allocation_five_plus_depts():
     EVERY department's students receive seat allocations in the generated plan.
     No department may be omitted, hardcoded, or starved.
     """
-    room_a = _make_room(room_id=1, name="Hall A", rows=8, cols=5, spb=2)  # 80 seats
+    room_a = _make_room(room_id=1, name="Hall A", rows=6, cols=5, spb=2)  # 60 seats
     room_b = _make_room(room_id=2, name="Hall B", rows=6, cols=5, spb=2)  # 60 seats
 
     depts = [

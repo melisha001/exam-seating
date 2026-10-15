@@ -5,12 +5,19 @@ import {
   ZoomOut,
   RotateCcw,
   Maximize2,
+  AlertTriangle,
+  CheckCircle2,
+  XCircle,
+  ShieldCheck,
 } from 'lucide-react';
 import { RoomGrid, SeatAssignment, Department } from '../../types';
 import { BenchCard } from './BenchCard';
+import { validateGrid } from '../../lib/validation';
+import { getSeaterBreakdown } from '../../lib/utils';
 
 interface SeatingGridProps {
   room: RoomGrid;
+  allRooms?: RoomGrid[];
   deptMap: Map<number, Department>;
   selectedSeatId: number | null;
   swapSourceSeatId: number | null;
@@ -22,6 +29,7 @@ interface SeatingGridProps {
 
 export const SeatingGrid: React.FC<SeatingGridProps> = ({
   room,
+  allRooms,
   deptMap,
   selectedSeatId,
   swapSourceSeatId,
@@ -52,51 +60,99 @@ export const SeatingGrid: React.FC<SeatingGridProps> = ({
     return room.seats.reduce((max, s) => Math.max(max, s.col), 0) + 1;
   }, [room.seats]);
 
+  const totalBenches = maxRow * maxCol;
+  const breakdown = room.seater_breakdown || getSeaterBreakdown({
+    rows: maxRow,
+    columns: maxCol,
+    seats_per_bench: 2,
+    seater_breakdown: room.seater_breakdown,
+  });
+
   const handleZoomIn = () => setZoomLevel((z) => Math.min(140, z + 15));
   const handleZoomOut = () => setZoomLevel((z) => Math.max(70, z - 15));
   const handleResetZoom = () => setZoomLevel(100);
 
-  // Calculate department distribution for this room
+  // Calculate department and medium distribution for this room
   const roomDeptCounts = useMemo(() => {
-    const counts = new Map<number, number>();
+    const counts = new Map<string, { dept: Department | undefined; medium: string; count: number }>();
     room.seats.forEach((s) => {
       if (s.department_id) {
-        counts.set(s.department_id, (counts.get(s.department_id) || 0) + 1);
+        const med = s.medium || 'EN';
+        const key = `${s.department_id}-${med}`;
+        if (!counts.has(key)) {
+          counts.set(key, { dept: deptMap.get(s.department_id), medium: med, count: 0 });
+        }
+        counts.get(key)!.count += 1;
       }
     });
-    return Array.from(counts.entries()).map(([deptId, count]) => ({
-      dept: deptMap.get(deptId),
-      count,
-    }));
+    return Array.from(counts.values());
   }, [room.seats, deptMap]);
+
+  // Validation report for the current room grid
+  const validation = useMemo(() => {
+    return validateGrid(room, false, allRooms);
+  }, [room, allRooms]);
 
   return (
     <div className="bg-card border border-border rounded-3xl p-5 sm:p-6 shadow-sm space-y-4 flex flex-col min-w-0">
-      {/* Zoom and Grid Controls Header */}
+      {/* Red Warning Banner for Violations */}
+      {!validation.isValid && (
+        <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 text-xs space-y-2 animate-in fade-in">
+          <div className="flex items-center gap-2 font-bold text-rose-800 dark:text-rose-300">
+            <AlertTriangle className="w-4 h-4 text-rose-500 flex-shrink-0" />
+            <span>Seating Layout Violations ({validation.violations.length})</span>
+          </div>
+          <ul className="list-disc pl-5 space-y-1 text-rose-900/90 dark:text-rose-200/90 font-mono text-[11px]">
+            {validation.violations.map((v, idx) => (
+              <li key={idx}>{v}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Hall Seater Info Chips & Controls Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-border/80 text-xs">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-bold text-foreground">
-            Hall Layout &amp; Bench Grid
+          {/* Header chips: total benches, seater breakdown, capacity, occupancy % */}
+          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-muted border border-border text-foreground">
+            {totalBenches} Benches
           </span>
-          <span className="text-muted-foreground text-[11px]">
-            ({maxRow} Rows &times; {maxCol} Benches/Row)
+          {breakdown && (
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-muted border border-border text-foreground font-mono">
+              {breakdown}
+            </span>
+          )}
+          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-primary/10 border border-primary/20 text-primary">
+            {room.assigned}/{room.capacity} Seats
+          </span>
+          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border ${
+            room.utilization_pct === 100
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+              : 'bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400'
+          }`}>
+            {room.utilization_pct}% Occupancy
           </span>
 
-          {/* Color-coded branch chips in hall header */}
+          {/* Color-coded branch chips with medium in hall header */}
           <div className="flex items-center gap-1.5 ml-2 flex-wrap">
-            {roomDeptCounts.map(({ dept, count }) => {
+            {roomDeptCounts.map(({ dept, medium, count }, idx) => {
               if (!dept) return null;
               return (
                 <span
-                  key={dept.id}
+                  key={idx}
                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border border-border/80 bg-muted/60 text-foreground"
                 >
                   <span
                     className="w-1.5 h-1.5 rounded-full"
                     style={{ backgroundColor: `hsl(${((dept.id * 53) % 360)}, 70%, 50%)` }}
                   />
-                  <span>{dept.code}:</span>
-                  <span className="font-mono">{count}</span>
+                  <span>{dept.code}</span>
+                  <span className={`px-1 py-0.2 rounded text-[8px] uppercase ${
+                    medium === 'TA' ? 'bg-amber-500/20 text-amber-600' : 'bg-sky-500/20 text-sky-600'
+                  }`}>
+                    {medium}
+                  </span>
+                  <span className="font-mono">: {count}</span>
                 </span>
               );
             })}
@@ -220,6 +276,93 @@ export const SeatingGrid: React.FC<SeatingGridProps> = ({
           {/* Rear of Hall Banner */}
           <div className="w-full py-2 text-center text-xs font-semibold text-muted-foreground/70 uppercase tracking-wider select-none border-t border-border/80">
             &darr; Back of Examination Hall &darr;
+          </div>
+        </div>
+      </div>
+
+      {/* Real Validation Checklist */}
+      <div className="mt-2 pt-4 border-t border-border/80">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-3">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-primary" />
+            <span className="font-bold text-xs text-foreground uppercase tracking-wider">
+              Hall Allocation Integrity Checklist
+            </span>
+          </div>
+          <span
+            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+              validation.isValid
+                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+            }`}
+          >
+            {validation.isValid ? (
+              <>
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                All 6 Integrity Checks Passed
+              </>
+            ) : (
+              <>
+                <XCircle className="w-3.5 h-3.5" />
+                {validation.violations.length} Violation{validation.violations.length > 1 ? 's' : ''} Detected
+              </>
+            )}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs">
+          <div className="flex items-center gap-2 p-2.5 rounded-xl bg-muted/40 border border-border/60">
+            {validation.checklist.fixedLayoutUnchanged ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+            ) : (
+              <XCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />
+            )}
+            <span className="text-foreground font-medium">1. Fixed Layouts Unchanged</span>
+          </div>
+
+          <div className="flex items-center gap-2 p-2.5 rounded-xl bg-muted/40 border border-border/60">
+            {validation.checklist.noUnexpectedEmptySeats ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+            ) : (
+              <XCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />
+            )}
+            <span className="text-foreground font-medium">2. No Unexpected Empty Seats</span>
+          </div>
+
+          <div className="flex items-center gap-2 p-2.5 rounded-xl bg-muted/40 border border-border/60">
+            {validation.checklist.noLeftRightConflicts ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+            ) : (
+              <XCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />
+            )}
+            <span className="text-foreground font-medium">3. Horizontal Anti-Copying</span>
+          </div>
+
+          <div className="flex items-center gap-2 p-2.5 rounded-xl bg-muted/40 border border-border/60">
+            {validation.checklist.noDiagonalConflicts ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+            ) : (
+              <XCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />
+            )}
+            <span className="text-foreground font-medium">4. Diagonal Anti-Copying</span>
+          </div>
+
+          <div className="flex items-center gap-2 p-2.5 rounded-xl bg-muted/40 border border-border/60">
+            {validation.checklist.allStudentsUnique ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+            ) : (
+              <XCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />
+            )}
+            <span className="text-foreground font-medium">5. Candidate Integrity (Unique)</span>
+          </div>
+
+          <div className="flex items-center gap-2 p-2.5 rounded-xl bg-muted/40 border border-border/60">
+            {validation.checklist.equalOccupancy ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+            ) : (
+              <XCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />
+            )}
+            <span className="text-foreground font-medium">6. Equal Occupancy (&le; 5% diff)</span>
           </div>
         </div>
       </div>

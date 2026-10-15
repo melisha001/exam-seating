@@ -67,9 +67,14 @@ class SeatAssignment(Base):
         Integer, ForeignKey("departments.id", ondelete="SET NULL"), nullable=True
     )
     subject: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    subject_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     # True when the seat is deliberately left empty (constraint-driven)
     is_empty: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_arrear: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    medium: Mapped[str | None] = mapped_column(String(10), default="EN", nullable=True)
+    seat_label: Mapped[str] = mapped_column(String(20), default="", nullable=False)
 
     # Relationships
     plan: Mapped["SeatingPlan"] = relationship("SeatingPlan", back_populates="seat_assignments")

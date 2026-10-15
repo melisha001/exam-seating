@@ -14,13 +14,16 @@ class ExamEntryBase(BaseModel):
     roll_start: str | None = Field(None, max_length=50, examples=["21CSE001"])
     roll_end: str | None = Field(None, max_length=50, examples=["21CSE060"])
     exclusions: str | None = Field(None, description="Comma-separated roll numbers excluded (absentees)")
+    is_arrear: bool = Field(False, description="True for arrear candidates")
+    medium: str = Field("EN", description="Medium of instruction: 'EN' or 'TA'")
 
     @model_validator(mode="after")
     def check_roll_range(self) -> "ExamEntryBase":
-        """Both roll_start and roll_end must be provided together, or neither."""
+        """For regular entries, both roll_start and roll_end must be provided together, or neither.
+        For arrear entries, roll_end is optional."""
         has_start = self.roll_start is not None and bool(self.roll_start.strip())
         has_end = self.roll_end is not None and bool(self.roll_end.strip())
-        if has_start != has_end:
+        if not self.is_arrear and (has_start != has_end):
             raise ValueError(
                 "Provide both roll_start and roll_end, or neither."
             )
@@ -38,6 +41,8 @@ class ExamEntryUpdate(BaseModel):
     roll_start: str | None = None
     roll_end: str | None = None
     exclusions: str | None = None
+    is_arrear: bool | None = None
+    medium: str | None = None
 
 
 class ExamEntryRead(ExamEntryBase):

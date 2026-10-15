@@ -158,43 +158,86 @@ export const SeatingView: React.FC<SeatingViewProps> = ({
             )}
           </div>
 
-          {/* Export & Print Action Buttons */}
+          {/* Export & Print & Save Action Buttons */}
           <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
               onClick={handlePrintRoom}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-border bg-background text-foreground text-xs font-semibold hover:bg-muted transition-colors shadow-2xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border bg-background text-foreground text-xs font-semibold hover:bg-muted transition-colors shadow-2xs"
               title="Print clean layout for this room"
             >
-              <Printer className="w-4 h-4 text-blue-500" />
-              Print Room Chart
+              <Printer className="w-3.5 h-3.5 text-blue-500" />
+              Print
             </button>
 
+            {/* Per-Hall Downloads */}
             <a
-              href={api.getPdfExportUrl(plan.plan_id)}
+              href={api.getHallPdfExportUrl(plan.plan_id, activeRoom.room_id)}
               download
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-border bg-background text-foreground text-xs font-semibold hover:bg-muted transition-colors shadow-2xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border bg-background text-foreground text-xs font-semibold hover:bg-muted transition-colors shadow-2xs"
+              title={`Download PDF for ${activeRoom.room_name}`}
             >
-              <FileText className="w-4 h-4 text-rose-500" />
-              Full PDF
+              <FileText className="w-3.5 h-3.5 text-rose-500" />
+              Hall PDF
             </a>
 
             <a
-              href={api.getExcelExportUrl(plan.plan_id)}
+              href={api.getHallExcelExportUrl(plan.plan_id, activeRoom.room_id)}
               download
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-border bg-background text-foreground text-xs font-semibold hover:bg-muted transition-colors shadow-2xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border bg-background text-foreground text-xs font-semibold hover:bg-muted transition-colors shadow-2xs"
+              title={`Download Excel for ${activeRoom.room_name}`}
             >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
-              Full Excel
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
+              Hall Excel
             </a>
+
+            {/* Overall 3-Column Downloads */}
+            <a
+              href={api.getOverallPdfExportUrl(plan.plan_id)}
+              download
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-primary/30 bg-primary/10 text-primary text-xs font-bold hover:bg-primary/20 transition-colors shadow-2xs"
+              title="Overall Seating (Department, Register Number Range, Hall Name)"
+            >
+              <FileText className="w-3.5 h-3.5 text-primary" />
+              Overall PDF
+            </a>
+
+            <a
+              href={api.getOverallExcelExportUrl(plan.plan_id)}
+              download
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-primary/30 bg-primary/10 text-primary text-xs font-bold hover:bg-primary/20 transition-colors shadow-2xs"
+              title="Overall Seating Excel (Department, Register Number Range, Hall Name)"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-primary" />
+              Overall Excel
+            </a>
+
+            {/* Save Changes Button */}
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await api.saveChanges(plan.plan_id);
+                  showToast('Seating changes saved and locked successfully!', 'success');
+                  await onRefreshPlan();
+                } catch (err: any) {
+                  showToast(err.message || 'Failed to save changes', 'error');
+                }
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition-colors shadow-sm ml-auto sm:ml-0"
+              title="Save all manual swaps and lock current seating arrangement"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Save Changes
+            </button>
 
             {swapSourceSeat && (
               <button
                 type="button"
                 onClick={() => setSwapSourceSeat(null)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 text-xs font-bold hover:bg-amber-500/20"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 text-xs font-bold hover:bg-amber-500/20"
               >
-                Cancel Swap Mode
+                Cancel Swap
               </button>
             )}
           </div>
@@ -221,10 +264,12 @@ export const SeatingView: React.FC<SeatingViewProps> = ({
               </div>
             );
           })}
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-dashed border-border text-muted-foreground text-xs">
-            <span className="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-700" />
-            <span>Empty Slot</span>
-          </div>
+          {activeRoom.capacity > activeRoom.assigned && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-dashed border-border text-muted-foreground text-xs">
+              <span className="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-700" />
+              <span>Empty Slot</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -336,14 +381,34 @@ export const SeatingView: React.FC<SeatingViewProps> = ({
                     {activeRoom.room_name}
                   </h3>
                   <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/20">
-                    {activeRoom.utilization_pct}% Utilized
+                    {activeRoom.utilization_pct === 100 ? '100% Utilized (Zero Empty Seats)' : `${activeRoom.utilization_pct}% Utilized`}
                   </span>
                 </div>
 
-                <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
-                  <User className="w-3.5 h-3.5 text-primary" />
-                  Hall In-Charge: <strong className="text-foreground">{activeRoom.invigilator_name || 'Unassigned'}</strong>
-                </p>
+                <div className="space-y-1 mt-1.5">
+                  <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-primary" />
+                    <span>In-Charge 1:</span>
+                    <strong className="text-foreground">{activeRoom.invigilator_name || 'Unassigned'}</strong>
+                    {activeRoom.invigilator1_subject && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono">
+                        ({activeRoom.invigilator1_subject})
+                      </span>
+                    )}
+                  </p>
+                  {activeRoom.invigilator2_name && (
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>In-Charge 2:</span>
+                      <strong className="text-foreground">{activeRoom.invigilator2_name}</strong>
+                      {activeRoom.invigilator2_subject && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono">
+                          ({activeRoom.invigilator2_subject})
+                        </span>
+                      )}
+                    </p>
+                  )}
+                </div>
               </div>
 
               {/* Utilization Bar */}
@@ -365,6 +430,7 @@ export const SeatingView: React.FC<SeatingViewProps> = ({
           {/* Interactive Seating Grid */}
           <SeatingGrid
             room={activeRoom}
+            allRooms={plan.rooms}
             deptMap={deptMap}
             selectedSeatId={drawerSeat?.id || null}
             swapSourceSeatId={swapSourceSeat?.id || null}

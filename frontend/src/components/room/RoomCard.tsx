@@ -1,6 +1,7 @@
 import React from 'react';
 import { Building2, User, Edit3, Trash2, Users, LayoutGrid } from 'lucide-react';
 import { Room } from '../../types';
+import { getSeaterBreakdown } from '../../lib/utils';
 
 interface RoomCardProps {
   room: Room;
@@ -10,6 +11,7 @@ interface RoomCardProps {
 
 export const RoomCard: React.FC<RoomCardProps> = ({ room, onEdit, onDelete }) => {
   const totalBenches = room.rows * room.columns;
+  const breakdown = getSeaterBreakdown(room);
 
   return (
     <div className="group relative bg-card border border-border hover:border-primary/50 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all space-y-4 flex flex-col justify-between">
@@ -23,10 +25,24 @@ export const RoomCard: React.FC<RoomCardProps> = ({ room, onEdit, onDelete }) =>
             <h4 className="font-bold text-base text-foreground tracking-tight">
               {room.name}
             </h4>
-            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-              <User className="w-3.5 h-3.5 text-primary/70" />
-              {room.invigilator_name || 'No Invigilator Assigned'}
-            </p>
+            <div className="space-y-0.5 mt-1">
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <User className="w-3 h-3 text-primary/70" />
+                <span className="font-medium text-foreground">{room.invigilator_name || 'In-Charge 1: Unassigned'}</span>
+                {room.invigilator1_subject && (
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-muted text-muted-foreground">({room.invigilator1_subject})</span>
+                )}
+              </p>
+              {room.invigilator2_name && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <User className="w-3 h-3 text-indigo-400" />
+                  <span className="font-medium text-foreground">{room.invigilator2_name}</span>
+                  {room.invigilator2_subject && (
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-muted text-muted-foreground">({room.invigilator2_subject})</span>
+                  )}
+                </p>
+              )}
+            </div>
           </div>
         </div>
 
@@ -68,8 +84,8 @@ export const RoomCard: React.FC<RoomCardProps> = ({ room, onEdit, onDelete }) =>
           <span className="text-[10px] uppercase font-bold text-muted-foreground block">
             Bench Type
           </span>
-          <span className="font-extrabold text-foreground text-xs mt-0.5 block">
-            {room.seats_per_bench} {room.seats_per_bench === 1 ? 'seat' : 'seats'}
+          <span className="font-extrabold text-foreground text-xs mt-0.5 block truncate" title={breakdown}>
+            {breakdown}
           </span>
         </div>
 

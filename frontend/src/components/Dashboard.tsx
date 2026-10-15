@@ -41,7 +41,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   showToast,
 }) => {
   const [sessionToDelete, setSessionToDelete] = useState<ExamSession | null>(null);
-  const [sessionToClearPlan, setSessionToClearPlan] = useState<ExamSession | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
   const handleDeleteSession = async () => {
@@ -54,21 +53,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       await onRefreshData?.();
     } catch (err: any) {
       showToast?.(err.message || 'Failed to delete session', 'error');
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-
-  const handleClearPlan = async () => {
-    if (!sessionToClearPlan) return;
-    try {
-      setIsDeleting(true);
-      await api.deletePlanBySession(sessionToClearPlan.id);
-      showToast?.(`Cleared seating plan for session ${sessionToClearPlan.date} (${sessionToClearPlan.label})`, 'success');
-      setSessionToClearPlan(null);
-      await onRefreshData?.();
-    } catch (err: any) {
-      showToast?.(err.message || 'Failed to clear seating plan', 'error');
     } finally {
       setIsDeleting(false);
     }
@@ -248,28 +232,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       <button
                         type="button"
                         onClick={() => onSelectSession(sess.id)}
-                        className="flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg bg-secondary text-secondary-foreground text-xs font-medium hover:bg-secondary/80 transition-colors"
+                        className="flex-1 sm:flex-none px-4 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 transition-all shadow-xs flex items-center justify-center gap-1.5"
                       >
-                        Load / Plan
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setSessionToClearPlan(sess)}
-                        className="px-2.5 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted text-xs font-medium transition-colors inline-flex items-center gap-1"
-                        title="Clear seating plan only (keeps exam session and departments)"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5 text-amber-500" />
-                        <span className="hidden sm:inline">Clear Plan</span>
+                        <span>View Seating Plan</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
                       </button>
 
                       <button
                         type="button"
                         onClick={() => setSessionToDelete(sess)}
-                        className="p-1.5 rounded-lg border border-border hover:border-rose-500/40 text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 text-xs transition-colors"
+                        className="p-2 rounded-xl border border-border hover:border-rose-500/40 text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 text-xs transition-colors"
                         title="Delete entire session and registered entries"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
@@ -357,46 +332,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 className="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold hover:bg-rose-700 transition-colors shadow-xs"
               >
                 {isDeleting ? 'Deleting...' : 'Delete Everything'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Clear Seating Plan Confirmation Modal */}
-      {sessionToClearPlan && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-card border border-border rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center gap-3 text-amber-500">
-              <div className="p-2 rounded-xl bg-amber-500/10">
-                <RotateCcw className="w-5 h-5" />
-              </div>
-              <h4 className="font-bold text-base text-foreground">
-                Clear Seating Plan Only?
-              </h4>
-            </div>
-
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              This will reset the generated seat allocations for <strong className="text-foreground">{sessionToClearPlan.date} ({sessionToClearPlan.label})</strong>.
-              Your registered departments and roll number configurations will be preserved so you can regenerate anytime.
-            </p>
-
-            <div className="flex items-center justify-end gap-2.5 pt-2">
-              <button
-                type="button"
-                disabled={isDeleting}
-                onClick={() => setSessionToClearPlan(null)}
-                className="px-4 py-2 rounded-xl border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={isDeleting}
-                onClick={handleClearPlan}
-                className="px-4 py-2 rounded-xl bg-amber-600 text-white text-xs font-bold hover:bg-amber-700 transition-colors shadow-xs"
-              >
-                {isDeleting ? 'Clearing...' : 'Clear Plan Only'}
               </button>
             </div>
           </div>

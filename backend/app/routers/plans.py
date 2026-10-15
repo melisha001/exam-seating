@@ -13,6 +13,7 @@ GET    /plans/{plan_id}/export/excel Download Excel
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -102,7 +103,12 @@ def _build_plan_detail(plan: SeatingPlan, db: Session) -> PlanDetail:
                 "roll_number": s.roll_number,
                 "department_id": s.department_id,
                 "subject": s.subject,
+                "subject_code": s.subject_code,
+                "medium": getattr(s, "medium", "EN") or "EN",
                 "is_empty": s.is_empty,
+                "is_arrear": s.is_arrear,
+                "is_locked": s.is_locked,
+                "seat_label": s.seat_label,
             }
             for s in r_seats
         ]
@@ -110,9 +116,17 @@ def _build_plan_detail(plan: SeatingPlan, db: Session) -> PlanDetail:
             room_id=rid,
             room_name=room.name,
             invigilator_name=room.invigilator_name,
+            invigilator2_name=room.invigilator2_name,
+            invigilator1_subject=room.invigilator1_subject,
+            invigilator2_subject=room.invigilator2_subject,
             capacity=cap,
             assigned=used,
             utilization_pct=util,
+            rows=room.rows,
+            columns=room.columns,
+            bench_config=room.bench_config,
+            seater_mode=getattr(room, "seater_mode", "auto") or "auto",
+            seater_breakdown=room.seater_breakdown,
             seats=seat_dicts,
         ))
 
@@ -260,6 +274,9 @@ def generate_plan(body: GeneratePlanRequest, db: Session = Depends(get_db)):
             dept_code=entry.department.code,
             subject=subj_label,
             rolls=rolls,
+            subject_code=entry.subject_code,
+            is_arrear=entry.is_arrear,
+            medium=getattr(entry, "medium", "EN") or "EN",
         ))
 
     room_specs: list[RoomSpec] = [
@@ -270,16 +287,127 @@ def generate_plan(body: GeneratePlanRequest, db: Session = Depends(get_db)):
             cols=r.columns,
             seats_per_bench=r.seats_per_bench,
             invigilator_name=r.invigilator_name,
+            invigilator2_name=r.invigilator2_name,
+            invigilator1_subject=r.invigilator1_subject,
+            invigilator2_subject=r.invigilator2_subject,
+            bench_config=r.bench_config,
+            seater_mode=getattr(r, "seater_mode", "auto") or "auto",
         )
         for r in rooms
     ]
 
     # Run algorithm
-    result = generate_seating(dept_groups, room_specs, check_front_back=body.check_front_back)
+    try:
+        result = generate_seating(
+            dept_groups,
+            room_specs,
+            check_front_back=body.check_front_back,
+            treat_different_medium_as_different_paper=getattr(body, "treat_different_medium_as_different_paper", False),
+            equal_students_per_hall=getattr(body, "equal_students_per_hall", False),
+        )
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(ve),
+        )
 
     # Persist
     plan = plan_crud.save_plan(db, body.session_id, result)
     return _build_plan_detail(plan, db)
+
+
+class TargetCheckRequest(BaseModel):
+    session_id: int
+    room_ids: list[int]
+    equal_students_per_hall: bool = False
+
+
+@router.post("/target-check")
+def check_targets(body: TargetCheckRequest, db: Session = Depends(get_db)):
+    """Check target student counts vs current capacities for selected halls."""
+    from app.algorithm.seating import get_hall_targets
+
+    session = session_crud.get_session(db, body.session_id)
+    if not session:
+        raise HTTPException(404, f"Session {body.session_id} not found.")
+
+    entries = entry_crud.get_entries(db, session_id=body.session_id)
+    total_students = sum(e.student_count for e in entries)
+    if not body.room_ids:
+        return {
+            "is_valid": False,
+            "total_students": total_students,
+            "total_capacity": 0,
+            "shortage": total_students,
+            "messages": ["No examination halls selected."],
+            "halls": [],
+        }
+
+    rooms = [room_crud.get_room(db, rid) for rid in body.room_ids]
+    valid_rooms = [r for r in rooms if r is not None]
+    total_capacity = sum(r.capacity for r in valid_rooms)
+
+    room_specs = [
+        RoomSpec(
+            room_id=r.id,
+            room_name=r.name,
+            rows=r.rows,
+            cols=r.columns,
+            seats_per_bench=r.seats_per_bench,
+            bench_config=r.bench_config,
+            seater_mode=getattr(r, "seater_mode", "auto") or "auto",
+        )
+        for r in valid_rooms
+    ]
+
+    if total_students > total_capacity:
+        shortage = total_students - total_capacity
+        return {
+            "is_valid": False,
+            "total_students": total_students,
+            "total_capacity": total_capacity,
+            "shortage": shortage,
+            "messages": [
+                f"Short by {shortage} seat{'s' if shortage > 1 else ''}. Add a hall or edit benches in Halls & Depts."
+            ],
+            "halls": [],
+        }
+
+    targets = get_hall_targets(
+        total_students,
+        len(valid_rooms),
+        rooms=room_specs,
+        equal_students_per_hall=body.equal_students_per_hall,
+    )
+    halls_info = []
+    messages = []
+    for r, target in zip(valid_rooms, targets):
+        cap = r.capacity
+        diff = cap - target
+        is_matched = (cap == target)
+        halls_info.append({
+            "room_id": r.id,
+            "room_name": r.name,
+            "capacity": cap,
+            "target": target,
+            "diff": diff,
+            "is_matched": is_matched,
+            "seater_breakdown": r.seater_breakdown,
+        })
+
+    if total_students < total_capacity:
+        unused = total_capacity - total_students
+        messages.append(f"{unused} seats will stay unused. Edit halls in Halls & Depts to match, or continue.")
+
+    return {
+        "is_valid": True,
+        "total_students": total_students,
+        "total_capacity": total_capacity,
+        "shortage": 0,
+        "messages": messages,
+        "halls": halls_info,
+    }
+
 
 
 @router.get("/session/{session_id}", response_model=PlanDetail)
@@ -332,12 +460,16 @@ def swap_seats(plan_id: int, body: SwapRequest, db: Session = Depends(get_db)):
         seat_a.roll_number, seat_b.roll_number,
         seat_a.department_id, seat_b.department_id,
         seat_a.subject, seat_b.subject,
+        seat_a.subject_code, seat_b.subject_code,
         seat_a.is_empty, seat_b.is_empty,
+        seat_a.is_arrear, seat_b.is_arrear,
     ) = (
         seat_b.roll_number, seat_a.roll_number,
         seat_b.department_id, seat_a.department_id,
         seat_b.subject, seat_a.subject,
+        seat_b.subject_code, seat_a.subject_code,
         seat_b.is_empty, seat_a.is_empty,
+        seat_b.is_arrear, seat_a.is_arrear,
     )
     db.commit()
 
@@ -351,8 +483,8 @@ def swap_seats(plan_id: int, body: SwapRequest, db: Session = Depends(get_db)):
 # ── Export endpoints ──────────────────────────────────────────────────────────
 
 @router.get("/{plan_id}/export/pdf")
-def export_pdf(plan_id: int, db: Session = Depends(get_db)):
-    """Download the seating plan as a PDF (one landscape A4 page per room)."""
+def export_pdf(plan_id: int, room_id: int | None = None, db: Session = Depends(get_db)):
+    """Download the seating plan as a PDF (one landscape A4 page per room, or filtered to a single room)."""
     plan = _plan_or_404(db, plan_id)
     all_seats = plan_crud.get_seats_for_plan(db, plan_id)
 
@@ -360,45 +492,53 @@ def export_pdf(plan_id: int, db: Session = Depends(get_db)):
     room_ids_ordered: list[int] = []
     seats_by_room: dict[int, list[SeatAssignment]] = {}
     for seat in all_seats:
+        if room_id is not None and seat.room_id != room_id:
+            continue
         if seat.room_id not in seats_by_room:
             room_ids_ordered.append(seat.room_id)
             seats_by_room[seat.room_id] = []
         seats_by_room[seat.room_id].append(seat)
 
     rooms = [room_crud.get_room(db, rid) for rid in room_ids_ordered]
+    rooms = [r for r in rooms if r is not None]
 
     pdf_bytes = generate_pdf(plan, rooms, seats_by_room)
+    filename = f"seating_plan_{plan_id}_room_{room_id}.pdf" if room_id else f"seating_plan_{plan_id}.pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f'attachment; filename="seating_plan_{plan_id}.pdf"'
+            "Content-Disposition": f'attachment; filename="{filename}"'
         },
     )
 
 
 @router.get("/{plan_id}/export/excel")
-def export_excel(plan_id: int, db: Session = Depends(get_db)):
-    """Download the seating plan as an Excel workbook."""
+def export_excel(plan_id: int, room_id: int | None = None, db: Session = Depends(get_db)):
+    """Download the seating plan as an Excel workbook (or single room)."""
     plan = _plan_or_404(db, plan_id)
     all_seats = plan_crud.get_seats_for_plan(db, plan_id)
 
     room_ids_ordered: list[int] = []
     seats_by_room: dict[int, list[SeatAssignment]] = {}
     for seat in all_seats:
+        if room_id is not None and seat.room_id != room_id:
+            continue
         if seat.room_id not in seats_by_room:
             room_ids_ordered.append(seat.room_id)
             seats_by_room[seat.room_id] = []
         seats_by_room[seat.room_id].append(seat)
 
     rooms = [room_crud.get_room(db, rid) for rid in room_ids_ordered]
+    rooms = [r for r in rooms if r is not None]
 
     xlsx_bytes = generate_excel(plan, rooms, seats_by_room)
+    filename = f"seating_plan_{plan_id}_room_{room_id}.xlsx" if room_id else f"seating_plan_{plan_id}.xlsx"
     return Response(
         content=xlsx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
-            "Content-Disposition": f'attachment; filename="seating_plan_{plan_id}.xlsx"'
+            "Content-Disposition": f'attachment; filename="{filename}"'
         },
     )
 
@@ -544,6 +684,165 @@ def get_plan_branch_summary(plan_id: int, db: Session = Depends(get_db)):
     """Retrieve branch-wise and hall-wise allocation summary for a plan."""
     plan = _plan_or_404(db, plan_id)
     return _build_branch_summary(plan, db)
+
+
+@router.get("/{plan_id}/export/overall-pdf")
+def export_overall_pdf(plan_id: int, db: Session = Depends(get_db)):
+    """
+    Download overall seating arrangement PDF with exactly 3 columns:
+    Department Name, Register Number Range (Start - End), Hall Name.
+    """
+    from io import BytesIO
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, portrait
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.units import cm, mm
+
+    plan = _plan_or_404(db, plan_id)
+    all_seats = plan_crud.get_seats_for_plan(db, plan_id)
+    departments = dept_crud.get_departments(db)
+    dept_map = {d.id: d for d in departments}
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=portrait(A4),
+        leftMargin=1.5 * cm,
+        rightMargin=1.5 * cm,
+        topMargin=1.5 * cm,
+        bottomMargin=1.5 * cm,
+        title="Overall Seating Arrangement",
+    )
+    styles = getSampleStyleSheet()
+    heading = ParagraphStyle("heading", parent=styles["Heading1"], fontSize=14, spaceAfter=6, alignment=1)
+    sub = ParagraphStyle("sub", parent=styles["Normal"], fontSize=9, textColor=colors.grey, alignment=1)
+
+    story = [
+        Paragraph("OVERALL EXAMINATION SEATING ARRANGEMENT", heading),
+        Paragraph(f"Plan #{plan.id} | Session ID: {plan.session_id}", sub),
+        Spacer(1, 6 * mm),
+    ]
+
+    # Exactly 3 columns
+    table_rows = [["Department Name", "Register Number Range", "Hall Name"]]
+
+    # Collect grouped allocations: by department, then hall
+    dept_room_seats: dict[int, dict[int, list[SeatAssignment]]] = {}
+    for seat in all_seats:
+        if not seat.is_empty and seat.department_id:
+            dept_room_seats.setdefault(seat.department_id, {}).setdefault(seat.room_id, []).append(seat)
+
+    for dept in departments:
+        rooms_for_dept = dept_room_seats.get(dept.id, {})
+        for rid, s_list in rooms_for_dept.items():
+            room = room_crud.get_room(db, rid)
+            room_name = room.name if room else f"Hall {rid}"
+            s_list.sort(key=lambda s: (s.row, s.col, s.seat_index))
+            rolls = [s.roll_number for s in s_list if s.roll_number]
+            if rolls:
+                roll_range = f"{rolls[0]} - {rolls[-1]}" if len(rolls) > 1 else rolls[0]
+                table_rows.append([dept.name, roll_range, room_name])
+
+    if len(table_rows) == 1:
+        table_rows.append(["—", "No students allocated", "—"])
+
+    tbl = Table(table_rows, colWidths=[6 * cm, 7 * cm, 5 * cm])
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+    ]))
+    story.append(tbl)
+    doc.build(story)
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="overall_seating_arrangement_{plan_id}.pdf"'},
+    )
+
+
+@router.get("/{plan_id}/export/overall-excel")
+def export_overall_excel(plan_id: int, db: Session = Depends(get_db)):
+    """
+    Download overall seating arrangement Excel with exactly 3 columns:
+    Department Name, Register Number Range, Hall Name.
+    """
+    from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+
+    plan = _plan_or_404(db, plan_id)
+    all_seats = plan_crud.get_seats_for_plan(db, plan_id)
+    departments = dept_crud.get_departments(db)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Overall Arrangement"
+
+    headers = ["Department Name", "Register Number Range", "Hall Name"]
+    for ci, h in enumerate(headers, 1):
+        c = ws.cell(1, ci, h)
+        c.font = Font(bold=True, color="FFFFFF", size=10)
+        c.fill = PatternFill("solid", fgColor="1E3A8A")
+        c.alignment = Alignment(horizontal="center", vertical="center")
+
+    ws.column_dimensions["A"].width = 30
+    ws.column_dimensions["B"].width = 35
+    ws.column_dimensions["C"].width = 25
+    ws.row_dimensions[1].height = 24
+
+    dept_room_seats: dict[int, dict[int, list[SeatAssignment]]] = {}
+    for seat in all_seats:
+        if not seat.is_empty and seat.department_id:
+            dept_room_seats.setdefault(seat.department_id, {}).setdefault(seat.room_id, []).append(seat)
+
+    row_idx = 2
+    thin = Side(style="thin", color="CCCCCC")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    for dept in departments:
+        rooms_for_dept = dept_room_seats.get(dept.id, {})
+        for rid, s_list in rooms_for_dept.items():
+            room = room_crud.get_room(db, rid)
+            room_name = room.name if room else f"Hall {rid}"
+            s_list.sort(key=lambda s: (s.row, s.col, s.seat_index))
+            rolls = [s.roll_number for s in s_list if s.roll_number]
+            if rolls:
+                roll_range = f"{rolls[0]} - {rolls[-1]}" if len(rolls) > 1 else rolls[0]
+                ws.cell(row_idx, 1, dept.name).border = border
+                ws.cell(row_idx, 2, roll_range).border = border
+                ws.cell(row_idx, 3, room_name).border = border
+                ws.cell(row_idx, 1).alignment = Alignment(horizontal="left", vertical="center")
+                ws.cell(row_idx, 2).alignment = Alignment(horizontal="center", vertical="center")
+                ws.cell(row_idx, 3).alignment = Alignment(horizontal="center", vertical="center")
+                ws.row_dimensions[row_idx].height = 20
+                row_idx += 1
+
+    buf = BytesIO()
+    wb.save(buf)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="overall_seating_arrangement_{plan_id}.xlsx"'},
+    )
+
+
+@router.post("/{plan_id}/save-changes", response_model=dict)
+def save_plan_changes(plan_id: int, body: dict = None, db: Session = Depends(get_db)):
+    """Persist and lock seating arrangement changes."""
+    plan = _plan_or_404(db, plan_id)
+    all_seats = plan_crud.get_seats_for_plan(db, plan_id)
+    for seat in all_seats:
+        seat.is_locked = True
+    db.commit()
+    return {"message": "All seating assignments saved and locked successfully.", "plan_id": plan_id}
 
 
 @router.delete("/session/{session_id}", response_model=dict)

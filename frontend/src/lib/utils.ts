@@ -72,3 +72,60 @@ export function getDeptColor(deptId: number | null) {
   const key = ((deptId - 1) % 6) + 1;
   return DEPT_COLORS[key];
 }
+
+export function getSeaterBreakdown(room: {
+  rows: number;
+  columns: number;
+  seats_per_bench: number;
+  bench_config?: string | null;
+  seater_breakdown?: string | null;
+}): string {
+  if (room.seater_breakdown) {
+    return room.seater_breakdown;
+  }
+  let parsedConfig: Record<string, number> | number[][] | null = null;
+  if (room.bench_config) {
+    try {
+      parsedConfig = JSON.parse(room.bench_config);
+    } catch {
+      parsedConfig = null;
+    }
+  }
+
+  let count1S = 0;
+  let count2S = 0;
+  let count3S = 0;
+
+  for (let r = 0; r < room.rows; r++) {
+    for (let c = 0; c < room.columns; c++) {
+      let seats = room.seats_per_bench;
+      if (parsedConfig) {
+        if (Array.isArray(parsedConfig)) {
+          if (r < parsedConfig.length && c < parsedConfig[r].length) {
+            seats = Number(parsedConfig[r][c]) || seats;
+          }
+        } else if (typeof parsedConfig === 'object') {
+          const key = `${r}-${c}`;
+          if (key in parsedConfig) {
+            seats = Number((parsedConfig as Record<string, number>)[key]) || seats;
+          }
+        }
+      }
+      if (seats === 1) count1S++;
+      else if (seats === 3) count3S++;
+      else count2S++;
+    }
+  }
+
+  const total = room.rows * room.columns;
+  if (count1S === total) return 'All 1-Seaters';
+  if (count2S === total) return 'All 2-Seaters';
+  if (count3S === total) return 'All 3-Seaters';
+
+  const parts: string[] = [];
+  if (count3S > 0) parts.push(`3S x ${count3S}`);
+  if (count2S > 0) parts.push(`2S x ${count2S}`);
+  if (count1S > 0) parts.push(`1S x ${count1S}`);
+  return parts.join(' · ');
+}
+

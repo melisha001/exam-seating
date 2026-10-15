@@ -87,6 +87,16 @@ def generate_rolls(
             rolls = rolls + extras
         return rolls[:count]
 
+    if roll_start and not roll_end:
+        # Check if roll_start contains comma-separated rolls or a single roll
+        raw_items = [r.strip() for r in roll_start.split(",") if r.strip()]
+        ex_set = set(e.strip() for e in exclusions if e and e.strip()) if exclusions else set()
+        rolls = [r for r in raw_items if r not in ex_set]
+        if len(rolls) < count:
+            extras = [f"{dept_code}-X{i + 1}" for i in range(count - len(rolls))]
+            rolls = rolls + extras
+        return rolls[:count]
+
     # No range supplied — generate synthetic sequential roll numbers
     ex_set = set(e.strip() for e in exclusions if e and e.strip()) if exclusions else set()
     all_gen: list[str] = []

@@ -15,13 +15,18 @@ class DeptGroup:
     """
     One department's exam entry for a session.
 
-    `rolls` is an ordered list of roll numbers assigned in order
-    (first roll → first valid seat in reading order).
+    `rolls` is an ordered list of roll numbers assigned in order.
+    `subject_code` can be provided (e.g. CS8492). If not provided, `subject` is used.
+    `is_arrear` indicates if this entry contains arrear students.
+    `medium` indicates English (EN) or Tamil (TA).
     """
     dept_id: int
     dept_code: str
     subject: str
     rolls: list[str]
+    subject_code: str | None = None
+    is_arrear: bool = False
+    medium: str = "EN"
 
 
 @dataclass
@@ -33,6 +38,45 @@ class RoomSpec:
     cols: int
     seats_per_bench: int
     invigilator_name: str | None = None
+    invigilator2_name: str | None = None
+    invigilator1_subject: str | None = None
+    invigilator2_subject: str | None = None
+    bench_config: dict[str, int] | str | None = None
+    seater_mode: str = "auto"
+
+    def get_bench_seats(self, row: int, col: int) -> int:
+        """Return seats count on bench (row, col) (1, 2, or 3, default seats_per_bench)."""
+        if self.bench_config:
+            if isinstance(self.bench_config, str):
+                try:
+                    import json
+                    cfg = json.loads(self.bench_config)
+                except Exception:
+                    cfg = {}
+            else:
+                cfg = self.bench_config
+
+            if isinstance(cfg, dict):
+                key = f"{row}-{col}"
+                if key in cfg:
+                    return int(cfg[key])
+            elif isinstance(cfg, list) and row < len(cfg) and col < len(cfg[row]):
+                return int(cfg[row][col])
+        return self.seats_per_bench
+
+    @property
+    def capacity(self) -> int:
+        return sum(
+            self.get_bench_seats(r, c)
+            for r in range(self.rows)
+            for c in range(self.cols)
+        )
+
+    @property
+    def seater_breakdown(self) -> str:
+        from app.algorithm.labels import get_seater_breakdown
+        return get_seater_breakdown(self.rows, self.cols, self.seats_per_bench, self.bench_config)
+
 
 
 # ── Outputs ───────────────────────────────────────────────────────────────────
@@ -47,7 +91,12 @@ class SeatInfo:
     dept_id: int | None
     dept_code: str | None
     subject: str | None
-    is_empty: bool = False   # True when deliberately left blank by the algorithm
+    subject_code: str | None = None
+    medium: str | None = "EN"
+    is_empty: bool = False   # True when physically empty (e.g. no more students)
+    is_arrear: bool = False
+    is_locked: bool = False
+    seat_label: str = ""     # Standard label e.g. A1, B1, C1
 
 
 @dataclass
@@ -70,3 +119,7 @@ class SeatingResult:
     total_assigned: int
     unseated_count: int
     warnings: list[str]
+
+    @property
+    def rooms(self) -> list[RoomResult]:
+        return self.room_results

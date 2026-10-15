@@ -6,6 +6,8 @@ import {
   PlanDetail,
   GeneratePlanRequest,
   SwapRequest,
+  TargetCheckResponse,
+  AutoFitResponse,
 } from '../types';
 
 const API_BASE = '/api/v1';
@@ -127,6 +129,18 @@ export const api = {
     });
     return handleResponse<PlanDetail>(res);
   },
+  checkTargets: async (sessionId: number, roomIds: number[], equalStudentsPerHall?: boolean): Promise<TargetCheckResponse> => {
+    const res = await fetch(`${API_BASE}/plans/target-check`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessionId,
+        room_ids: roomIds,
+        equal_students_per_hall: !!equalStudentsPerHall,
+      }),
+    });
+    return handleResponse<TargetCheckResponse>(res);
+  },
   getPlanBySession: async (sessionId: number): Promise<PlanDetail> => {
     const res = await fetch(`${API_BASE}/plans/session/${sessionId}`);
     return handleResponse<PlanDetail>(res);
@@ -148,7 +162,21 @@ export const api = {
     return handleResponse<{ message: string }>(res);
   },
 
+  // Save & Lock Changes
+  saveChanges: async (planId: number): Promise<{ message: string }> => {
+    const res = await fetch(`${API_BASE}/plans/${planId}/save-changes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    return handleResponse<{ message: string }>(res);
+  },
+
   // Export URLs
   getPdfExportUrl: (planId: number) => `${API_BASE}/plans/${planId}/export/pdf`,
   getExcelExportUrl: (planId: number) => `${API_BASE}/plans/${planId}/export/excel`,
+  getHallPdfExportUrl: (planId: number, roomId: number) => `${API_BASE}/plans/${planId}/export/pdf?room_id=${roomId}`,
+  getHallExcelExportUrl: (planId: number, roomId: number) => `${API_BASE}/plans/${planId}/export/excel?room_id=${roomId}`,
+  getOverallPdfExportUrl: (planId: number) => `${API_BASE}/plans/${planId}/export/overall-pdf`,
+  getOverallExcelExportUrl: (planId: number) => `${API_BASE}/plans/${planId}/export/overall-excel`,
 };

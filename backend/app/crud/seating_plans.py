@@ -62,7 +62,12 @@ def save_plan(
                 roll_number=seat.roll_number,
                 department_id=seat.dept_id,
                 subject=seat.subject,
+                subject_code=seat.subject_code,
                 is_empty=seat.is_empty,
+                is_arrear=seat.is_arrear,
+                is_locked=seat.is_locked,
+                medium=seat.medium or "EN",
+                seat_label=seat.seat_label or "",
             )
             db.add(sa)
 

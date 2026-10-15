@@ -80,54 +80,72 @@ def generate_pdf(
             continue
 
         # ── Room header ───────────────────────────────────────────────────────
-        invig = room.invigilator_name or "—"
+        invig1_str = room.invigilator_name or "—"
+        if room.invigilator1_subject:
+            invig1_str += f" ({room.invigilator1_subject})"
+        invig2_str = room.invigilator2_name or "—"
+        if room.invigilator2_subject:
+            invig2_str += f" ({room.invigilator2_subject})"
+
         used = sum(1 for s in room_seats if not s.is_empty)
         cap = room.capacity
         util = f"{round(used / cap * 100, 1)}%" if cap else "—"
+        breakdown_str = f" ({room.seater_breakdown})" if getattr(room, "seater_breakdown", None) else ""
 
-        story.append(Paragraph(f"Room: {room.name}", heading))
+        story.append(Paragraph(f"Hall: {room.name} — {cap} seats{breakdown_str}", heading))
         story.append(Paragraph(
-            f"Invigilator: {invig}  |  Capacity: {cap}  |  "
-            f"Seated: {used}  |  Utilisation: {util}",
+            f"Hall In-Charge 1: <b>{invig1_str}</b>  |  Hall In-Charge 2: <b>{invig2_str}</b><br/>"
+            f"Capacity: {cap}  |  Seated: {used}  |  Utilisation: {util}",
             sub,
         ))
         story.append(Spacer(1, 4 * mm))
 
         # ── Seat grid ─────────────────────────────────────────────────────────
-        # Build a dict for O(1) lookup
         grid: dict[tuple, SeatAssignment] = {
             (s.row, s.col, s.seat_index): s for s in room_seats
         }
 
-        spb = room.seats_per_bench
-        # One table cell = one physical seat
-        # Layout: rows × (cols * seats_per_bench)
+        max_spb = max(
+            (room.get_bench_seats(r, c) for r in range(room.rows) for c in range(room.columns)),
+            default=room.seats_per_bench,
+        )
         table_data = []
         cell_styles: list = []
+
+        from app.algorithm.labels import get_seat_label
 
         for r in range(room.rows):
             row_cells = []
             for c in range(room.columns):
-                for si in range(spb):
-                    seat = grid.get((r, c, si))
-                    if seat and not seat.is_empty:
-                        text = f"{seat.roll_number or ''}\n{seat.subject[:8] if seat.subject else ''}"
-                        bg = _dept_colour(seat.department_id)
+                bench_seats = room.get_bench_seats(r, c)
+                for si in range(max_spb):
+                    col_idx = c * max_spb + si
+                    if si < bench_seats:
+                        seat = grid.get((r, c, si))
+                        lbl = (seat.seat_label if seat and seat.seat_label else get_seat_label(r, c, si, room.columns))
+                        if seat and not seat.is_empty:
+                            d_code = seat.department.code if seat.department else (f"D{seat.department_id}" if seat.department_id else "")
+                            med = f" ({seat.medium})" if getattr(seat, "medium", None) else ""
+                            arr_badge = " [ARR]" if seat.is_arrear else ""
+                            text = f"<b>{lbl}</b><br/>{seat.roll_number or ''}{arr_badge}<br/>{d_code}{med}"
+                            bg = _dept_colour(seat.department_id)
+                        else:
+                            text = f"<font color='#999999'>{lbl}</font><br/>Unused"
+                            bg = _EMPTY_COLOUR
+                        cell_styles.append(("BACKGROUND", (col_idx, r), (col_idx, r), bg))
+                        row_cells.append(Paragraph(text, body))
                     else:
-                        text = ""
-                        bg = _EMPTY_COLOUR
-
-                    col_idx = c * spb + si
-                    cell_styles.append(("BACKGROUND", (col_idx, r), (col_idx, r), bg))
-                    row_cells.append(Paragraph(text, body))
+                        # Non-existent seat in this bench for mixed layout
+                        cell_styles.append(("BACKGROUND", (col_idx, r), (col_idx, r), colors.white))
+                        row_cells.append(Paragraph("<font color='#cccccc'>—</font>", body))
             table_data.append(row_cells)
 
         if not table_data:
             story.append(Paragraph("(no seats)", sub))
         else:
-            total_cols = room.columns * spb
+            total_cols = room.columns * max_spb
             col_width = min(2.8 * cm, (landscape(A4)[0] - 3 * cm) / total_cols)
-            t = Table(table_data, colWidths=[col_width] * total_cols, rowHeights=1.4 * cm)
+            t = Table(table_data, colWidths=[col_width] * total_cols, rowHeights=1.5 * cm)
             base_style = [
                 ("GRID", (0, 0), (-1, -1), 0.3, colors.grey),
                 ("FONTSIZE", (0, 0), (-1, -1), 7),
@@ -137,12 +155,37 @@ def generate_pdf(
             t.setStyle(TableStyle(base_style + cell_styles))
             story.append(t)
 
+        # ── Student List Table for this Hall ──────────────────────────────────
+        seated_in_hall = [s for s in room_seats if not s.is_empty]
+        if seated_in_hall:
+            story.append(Spacer(1, 4 * mm))
+            hall_tbl_hdr = [["Seat", "Roll Number", "Department", "Medium", "Subject", "Type"]]
+            for s in seated_in_hall:
+                lbl = s.seat_label or get_seat_label(s.row, s.col, s.seat_index, room.columns)
+                d_code = s.department.code if s.department else (f"Dept {s.department_id}" if s.department_id else "—")
+                s_med = getattr(s, "medium", "EN") or "EN"
+                s_type = "Arrear" if s.is_arrear else "Regular"
+                subj = s.subject_code or s.subject or "—"
+                hall_tbl_hdr.append([lbl, s.roll_number or "—", d_code, s_med, subj, s_type])
+
+            list_t = Table(hall_tbl_hdr, colWidths=[2 * cm, 4 * cm, 2.5 * cm, 2 * cm, 5.5 * cm, 2 * cm])
+            list_t.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#334155")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+                ("GRID", (0, 0), (-1, -1), 0.3, colors.lightgrey),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ]))
+            story.append(list_t)
+
         # ── Signature line ────────────────────────────────────────────────────
         story.append(Spacer(1, 6 * mm))
         story.append(HRFlowable(width="100%", thickness=0.5, color=colors.grey))
         story.append(Paragraph(
-            f"Invigilator Signature: ________________________  "
-            f"Date: _______________  Room: {room.name}",
+            f"Invigilator 1 Signature: ________________________  "
+            f"Invigilator 2 Signature: ________________________  "
+            f"Date: _______________  Hall: {room.name}",
             sub,
         ))
         story.append(Spacer(1, 8 * mm))

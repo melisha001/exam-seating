@@ -14,6 +14,12 @@ class GeneratePlanRequest(BaseModel):
     check_front_back: bool = Field(
         True, description="Treat bench directly ahead/behind as adjacent (stricter)."
     )
+    treat_different_medium_as_different_paper: bool = Field(
+        False, description="When True, EN and TA of the same subject code are treated as different subjects."
+    )
+    equal_students_per_hall: bool = Field(
+        False, description="When True, distribute equal student counts across halls if capacities allow."
+    )
 
 
 class SwapRequest(BaseModel):
@@ -39,12 +45,21 @@ class RoomGrid(BaseModel):
     room_id: int
     room_name: str
     invigilator_name: str | None
+    invigilator2_name: str | None = None
+    invigilator1_subject: str | None = None
+    invigilator2_subject: str | None = None
     capacity: int
     assigned: int
     utilization_pct: float
+    rows: int | None = None
+    columns: int | None = None
+    bench_config: str | None = None
+    seater_mode: str | None = "auto"
+    seater_breakdown: str | None = None
     seats: list[dict]   # list of SeatAssignmentRead-compatible dicts
 
     model_config = {"from_attributes": True}
+
 
 
 class PlanDetail(PlanSummary):
@@ -58,6 +73,9 @@ class BranchHallAllocation(BaseModel):
     room_id: int
     room_name: str
     invigilator_name: str | None
+    invigilator2_name: str | None = None
+    invigilator1_subject: str | None = None
+    invigilator2_subject: str | None = None
     student_count: int
     roll_range: str
     roll_numbers: list[str]

@@ -4,8 +4,50 @@ export interface Room {
   rows: number;
   columns: number;
   seats_per_bench: number;
+  bench_config?: string | null;
+  seater_mode?: 'auto' | 'manual';
+  seater_breakdown?: string | null;
   invigilator_name: string | null;
+  invigilator2_name?: string | null;
+  invigilator1_subject?: string | null;
+  invigilator2_subject?: string | null;
   capacity: number;
+}
+
+export interface HallTargetInfo {
+  room_id: number;
+  room_name: string;
+  capacity: number;
+  target: number;
+  diff: number;
+  is_matched: boolean;
+  seater_mode?: string;
+  seater_breakdown?: string | null;
+}
+
+export interface TargetCheckResponse {
+  is_valid: boolean;
+  total_students: number;
+  total_capacity: number;
+  shortage: number;
+  messages: string[];
+  halls: HallTargetInfo[];
+}
+
+export interface AutoFitRoomResult {
+  id: number;
+  name: string;
+  rows: number;
+  columns: number;
+  capacity: number;
+  target: number;
+  bench_config: string | null;
+}
+
+export interface AutoFitResponse {
+  message: string;
+  total_students: number;
+  rooms: AutoFitRoomResult[];
 }
 
 export interface Department {
@@ -26,10 +68,12 @@ export interface ExamEntry {
   department_id: number;
   subject: string;
   subject_code?: string | null;
+  medium?: string;
   student_count: number;
   roll_start: string | null;
   roll_end: string | null;
   exclusions?: string | null;
+  is_arrear?: boolean;
 }
 
 export interface SeatAssignment {
@@ -42,16 +86,26 @@ export interface SeatAssignment {
   roll_number: string | null;
   department_id: number | null;
   subject: string | null;
+  subject_code?: string | null;
+  medium?: string | null;
   is_empty: boolean;
+  is_arrear?: boolean;
+  is_locked?: boolean;
+  seat_label?: string;
 }
 
 export interface RoomGrid {
   room_id: number;
   room_name: string;
   invigilator_name: string | null;
+  invigilator2_name?: string | null;
+  invigilator1_subject?: string | null;
+  invigilator2_subject?: string | null;
   capacity: number;
   assigned: number;
   utilization_pct: number;
+  seater_mode?: string;
+  seater_breakdown?: string | null;
   seats: SeatAssignment[];
 }
 
@@ -69,6 +123,8 @@ export interface GeneratePlanRequest {
   session_id: number;
   room_ids: number[];
   check_front_back: boolean;
+  treat_different_medium_as_different_paper?: boolean;
+  equal_students_per_hall?: boolean;
 }
 
 export interface SwapRequest {

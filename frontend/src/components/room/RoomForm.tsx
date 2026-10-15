@@ -21,6 +21,10 @@ interface RoomFormProps {
     columns: number;
     seats_per_bench: number;
     invigilator_name: string | null;
+    invigilator2_name?: string | null;
+    invigilator1_subject?: string | null;
+    invigilator2_subject?: string | null;
+    bench_config?: string | null;
   }) => Promise<void>;
   onCancel?: () => void;
   isSubmitting?: boolean;
@@ -39,7 +43,10 @@ export const RoomForm: React.FC<RoomFormProps> = ({
   const [columns, setColumns] = useState<number>(5);
   const [seatsPerBench, setSeatsPerBench] = useState<number>(2);
   const [invigilatorName, setInvigilatorName] = useState<string>('');
-  const [disabledBenches, setDisabledBenches] = useState<Set<string>>(new Set());
+  const [invigilator2Name, setInvigilator2Name] = useState<string>('');
+  const [invigilator1Subject, setInvigilator1Subject] = useState<string>('');
+  const [invigilator2Subject, setInvigilator2Subject] = useState<string>('');
+  const [benchConfig, setBenchConfig] = useState<Record<string, number>>({});
 
   // Populate fields if initialRoom changes (Edit mode)
   useEffect(() => {
@@ -49,25 +56,39 @@ export const RoomForm: React.FC<RoomFormProps> = ({
       setColumns(initialRoom.columns);
       setSeatsPerBench(initialRoom.seats_per_bench);
       setInvigilatorName(initialRoom.invigilator_name || '');
-      setDisabledBenches(new Set());
+      setInvigilator2Name(initialRoom.invigilator2_name || '');
+      setInvigilator1Subject(initialRoom.invigilator1_subject || '');
+      setInvigilator2Subject(initialRoom.invigilator2_subject || '');
+      if (initialRoom.bench_config) {
+        try {
+          setBenchConfig(JSON.parse(initialRoom.bench_config));
+        } catch {
+          setBenchConfig({});
+        }
+      } else {
+        setBenchConfig({});
+      }
     } else {
       setName('');
       setRows(8);
       setColumns(5);
       setSeatsPerBench(2);
       setInvigilatorName('');
-      setDisabledBenches(new Set());
+      setInvigilator2Name('');
+      setInvigilator1Subject('');
+      setInvigilator2Subject('');
+      setBenchConfig({});
     }
   }, [initialRoom]);
 
-  // Clean up disabled benches if rows or columns shrink
+  // Clean up benches outside bounds if rows or columns shrink
   const handleRowsChange = (newRows: number) => {
     setRows(newRows);
-    setDisabledBenches((prev) => {
-      const next = new Set<string>();
-      prev.forEach((key) => {
+    setBenchConfig((prev) => {
+      const next: Record<string, number> = {};
+      Object.entries(prev).forEach(([key, val]) => {
         const [r] = key.split('-').map(Number);
-        if (r < newRows) next.add(key);
+        if (r < newRows) next[key] = val;
       });
       return next;
     });
@@ -75,26 +96,33 @@ export const RoomForm: React.FC<RoomFormProps> = ({
 
   const handleColsChange = (newCols: number) => {
     setColumns(newCols);
-    setDisabledBenches((prev) => {
-      const next = new Set<string>();
-      prev.forEach((key) => {
+    setBenchConfig((prev) => {
+      const next: Record<string, number> = {};
+      Object.entries(prev).forEach(([key, val]) => {
         const [, c] = key.split('-').map(Number);
-        if (c < newCols) next.add(key);
+        if (c < newCols) next[key] = val;
       });
       return next;
     });
   };
 
-  const toggleBenchDisabled = (benchKey: string) => {
-    setDisabledBenches((prev) => {
-      const next = new Set(prev);
-      if (next.has(benchKey)) {
-        next.delete(benchKey);
-      } else {
-        next.add(benchKey);
-      }
-      return next;
+  const toggleBench = (benchKey: string) => {
+    setBenchConfig((prev) => {
+      const cur = prev[benchKey] ?? seatsPerBench ?? 2;
+      const nextVal = cur === 1 ? 2 : cur === 2 ? 3 : 1;
+      return { ...prev, [benchKey]: nextVal };
     });
+  };
+
+  const setAllBenches = (type: 1 | 2 | 3) => {
+    const nextCfg: Record<string, number> = {};
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < columns; c++) {
+        nextCfg[`${r}-${c}`] = type;
+      }
+    }
+    setSeatsPerBench(type);
+    setBenchConfig(nextCfg);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -107,6 +135,10 @@ export const RoomForm: React.FC<RoomFormProps> = ({
       columns,
       seats_per_bench: seatsPerBench,
       invigilator_name: invigilatorName.trim() || null,
+      invigilator2_name: invigilator2Name.trim() || null,
+      invigilator1_subject: invigilator1Subject.trim() || null,
+      invigilator2_subject: invigilator2Subject.trim() || null,
+      bench_config: Object.keys(benchConfig).length > 0 ? JSON.stringify(benchConfig) : null,
     });
   };
 
@@ -126,7 +158,7 @@ export const RoomForm: React.FC<RoomFormProps> = ({
               {isEditing ? `Edit Examination Hall: ${initialRoom?.name}` : 'Design & Add Examination Hall'}
             </h3>
             <p className="text-xs text-muted-foreground">
-              Configure room grid layout with live visual preview and interactive bench capacity control.
+              Configure room grid layout with live visual preview and interactive 2-seater/3-seater bench capacity control.
             </p>
           </div>
         </div>
@@ -136,52 +168,46 @@ export const RoomForm: React.FC<RoomFormProps> = ({
             type="button"
             onClick={onCancel}
             className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            title="Cancel"
           >
             <X className="w-5 h-5" />
           </button>
         )}
       </div>
 
-      {/* Main Two-Column Grid: Form Controls on Left, Live Preview on Right */}
+      {/* Main 2-Column Form Layout: Inputs (Left) & Visualizer (Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Left Column: Form Controls (5 cols) */}
         <div className="lg:col-span-5 space-y-5">
-          {/* Room Name */}
+          {/* Hall Name */}
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-foreground tracking-wide flex items-center gap-1.5">
-              <span>Room Name / Number</span>
-              <span className="text-destructive">*</span>
+            <label className="text-xs font-semibold text-foreground tracking-wide flex items-center justify-between">
+              <span>Hall Name / Number *</span>
+              <span className="text-[11px] text-muted-foreground font-normal">e.g. Hall A, LH-101</span>
             </label>
-            <div className="relative">
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Hall A, LH-201, or Audi-1"
-                required
-                className="w-full px-3.5 py-2.5 rounded-xl border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary focus:border-primary transition-all"
-              />
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              Unique identifier for students and staff.
-            </p>
+            <input
+              type="text"
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Hall D, Main Auditorium"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary focus:border-primary transition-all font-medium"
+            />
           </div>
 
-          {/* Steppers for Rows and Columns */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Steppers for Rows & Columns */}
+          <div className="grid grid-cols-2 gap-4">
             <NumberStepper
-              label="Number of Rows"
+              label="Rows"
               value={rows}
               min={1}
               max={25}
               unit="rows"
-              helperText="Length of hall"
+              helperText="Front to back"
               onChange={handleRowsChange}
             />
 
             <NumberStepper
-              label="Benches per Row"
+              label="Columns"
               value={columns}
               min={1}
               max={15}
@@ -191,60 +217,117 @@ export const RoomForm: React.FC<RoomFormProps> = ({
             />
           </div>
 
-          {/* Seats Per Bench (1, 2 or 3) */}
+          {/* Seater Mode & Presets */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold text-foreground tracking-wide">
-                Seats per Bench
+                Bench Seater Presets
               </label>
               <span className="text-[11px] text-muted-foreground">
-                Configured bench capacity
+                Or click individual benches in preview
               </span>
             </div>
 
-            <div className="grid grid-cols-3 gap-2.5">
-              {[1, 2, 3].map((num) => {
-                const isSelected = seatsPerBench === num;
-                return (
-                  <button
-                    key={num}
-                    type="button"
-                    onClick={() => setSeatsPerBench(num)}
-                    className={`py-2.5 px-3 rounded-xl border text-center transition-all select-none ${
-                      isSelected
-                        ? 'border-primary bg-primary text-primary-foreground font-bold shadow-xs'
-                        : 'border-input bg-background/80 hover:bg-muted text-muted-foreground hover:text-foreground font-medium'
-                    }`}
-                  >
-                    <div className="text-sm">{num} {num === 1 ? 'Seat' : 'Seats'}</div>
-                    <div className="text-[10px] opacity-75 mt-0.5">
-                      {num === 1 ? 'Single Desk' : num === 2 ? 'Standard 2-Seater' : 'Wide 3-Seater'}
-                    </div>
-                  </button>
-                );
-              })}
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setAllBenches(1)}
+                className={`py-2 px-2.5 rounded-xl border text-center transition-all select-none ${
+                  seatsPerBench === 1 && Object.values(benchConfig).every((v) => v === 1)
+                    ? 'border-teal-500 bg-teal-600 text-white font-bold shadow-xs'
+                    : 'border-input bg-background/80 hover:bg-muted text-muted-foreground hover:text-foreground font-medium'
+                }`}
+              >
+                <div className="text-xs sm:text-sm">All 1-Seaters</div>
+                <div className="text-[10px] opacity-75 mt-0.5">Single Desk</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAllBenches(2)}
+                className={`py-2 px-2.5 rounded-xl border text-center transition-all select-none ${
+                  seatsPerBench === 2 && Object.values(benchConfig).every((v) => v === 2)
+                    ? 'border-primary bg-primary text-primary-foreground font-bold shadow-xs'
+                    : 'border-input bg-background/80 hover:bg-muted text-muted-foreground hover:text-foreground font-medium'
+                }`}
+              >
+                <div className="text-xs sm:text-sm">All 2-Seaters</div>
+                <div className="text-[10px] opacity-75 mt-0.5">Standard Dual Desk</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAllBenches(3)}
+                className={`py-2 px-2.5 rounded-xl border text-center transition-all select-none ${
+                  seatsPerBench === 3 && Object.values(benchConfig).every((v) => v === 3)
+                    ? 'border-indigo-500 bg-indigo-600 text-white font-bold shadow-xs'
+                    : 'border-input bg-background/80 hover:bg-muted text-muted-foreground hover:text-foreground font-medium'
+                }`}
+              >
+                <div className="text-xs sm:text-sm">All 3-Seaters</div>
+                <div className="text-[10px] opacity-75 mt-0.5">Wide Triple Bench</div>
+              </button>
             </div>
           </div>
 
-          {/* Hall In-Charge (Invigilator) */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-foreground tracking-wide flex items-center gap-1.5">
-              <span>Hall In-Charge (Invigilator Name)</span>
-              <span className="text-[11px] text-muted-foreground font-normal">(Optional)</span>
-            </label>
-            <div className="relative">
-              <User className="w-4 h-4 text-muted-foreground absolute left-3.5 top-1/2 -translate-y-1/2" />
+          {/* Hall In-Charge 1 & Subject */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground tracking-wide flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-primary" />
+                <span>Hall In-Charge 1 (Name)</span>
+              </label>
               <input
                 type="text"
                 value={invigilatorName}
                 onChange={(e) => setInvigilatorName(e.target.value)}
-                placeholder="e.g. Dr. Ramesh Kumar, Dept of Mathematics"
-                className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+                placeholder="e.g. Dr. Ramesh Kumar"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary focus:border-primary transition-all"
               />
             </div>
-            <p className="text-[11px] text-muted-foreground">
-              Appears on the official printed seating charts and attendance sheets.
-            </p>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground tracking-wide flex items-center gap-1.5">
+                <span>In-Charge 1 Subject</span>
+              </label>
+              <input
+                type="text"
+                value={invigilator1Subject}
+                onChange={(e) => setInvigilator1Subject(e.target.value)}
+                placeholder="e.g. CS3301"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+              />
+            </div>
+          </div>
+
+          {/* Hall In-Charge 2 & Subject */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground tracking-wide flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-primary" />
+                <span>Hall In-Charge 2 (Name)</span>
+              </label>
+              <input
+                type="text"
+                value={invigilator2Name}
+                onChange={(e) => setInvigilator2Name(e.target.value)}
+                placeholder="e.g. Prof. Anitha Sharma"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground tracking-wide flex items-center gap-1.5">
+                <span>In-Charge 2 Subject</span>
+              </label>
+              <input
+                type="text"
+                value={invigilator2Subject}
+                onChange={(e) => setInvigilator2Subject(e.target.value)}
+                placeholder="e.g. MA3151"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+              />
+            </div>
           </div>
 
           {/* Action Buttons */}
@@ -292,8 +375,8 @@ export const RoomForm: React.FC<RoomFormProps> = ({
             columns={columns}
             seatsPerBench={seatsPerBench}
             invigilatorName={invigilatorName}
-            disabledBenches={disabledBenches}
-            onToggleBench={toggleBenchDisabled}
+            benchConfig={benchConfig}
+            onToggleBench={toggleBench}
           />
         </div>
       </div>

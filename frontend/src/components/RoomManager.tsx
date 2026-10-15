@@ -49,6 +49,10 @@ export const RoomManager: React.FC<RoomManagerProps> = ({
     columns: number;
     seats_per_bench: number;
     invigilator_name: string | null;
+    invigilator2_name?: string | null;
+    invigilator1_subject?: string | null;
+    invigilator2_subject?: string | null;
+    bench_config?: string | null;
   }) => {
     try {
       setIsSubmitting(true);

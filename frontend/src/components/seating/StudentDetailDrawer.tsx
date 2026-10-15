@@ -145,7 +145,7 @@ export const StudentDetailDrawer: React.FC<StudentDetailDrawerProps> = ({
             {/* Hall Location */}
             <div className="space-y-3">
               <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                Physical Desk Location
+                Physical Desk Location &amp; Hall Staff
               </h4>
 
               <div className="p-4 rounded-xl border border-border bg-card space-y-3 text-xs">
@@ -153,18 +153,27 @@ export const StudentDetailDrawer: React.FC<StudentDetailDrawerProps> = ({
                   <MapPin className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
                   <div className="space-y-1">
                     <span className="text-muted-foreground block text-[11px]">
-                      Hall &amp; Invigilator
+                      Hall &amp; In-Charges
                     </span>
                     <span className="font-bold text-foreground text-sm block">
                       {room?.room_name || 'Examination Hall'}
                     </span>
-                    <span className="text-xs text-muted-foreground">
-                      In-charge: {room?.invigilator_name || 'Assigned Invigilator'}
-                    </span>
+                    <div className="text-xs text-muted-foreground space-y-0.5">
+                      <p>In-charge 1: <strong className="text-foreground">{room?.invigilator_name || 'Unassigned'}</strong> {room?.invigilator1_subject && `(${room.invigilator1_subject})`}</p>
+                      {room?.invigilator2_name && (
+                        <p>In-charge 2: <strong className="text-foreground">{room?.invigilator2_name}</strong> {room?.invigilator2_subject && `(${room.invigilator2_subject})`}</p>
+                      )}
+                    </div>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/60 text-center">
+                <div className="grid grid-cols-4 gap-2 pt-2 border-t border-border/60 text-center">
+                  <div className="p-2 rounded-lg bg-primary/10 border border-primary/20">
+                    <span className="text-[10px] text-primary font-bold block">Seat Label</span>
+                    <span className="font-black text-primary font-mono text-sm">
+                      {seat.seat_label || `${String.fromCharCode(65 + seat.seat_index)}${seat.row * 10 + seat.col + 1}`}
+                    </span>
+                  </div>
                   <div className="p-2 rounded-lg bg-muted/40">
                     <span className="text-[10px] text-muted-foreground block">Row</span>
                     <span className="font-extrabold text-foreground font-mono text-sm">
@@ -178,9 +187,9 @@ export const StudentDetailDrawer: React.FC<StudentDetailDrawerProps> = ({
                     </span>
                   </div>
                   <div className="p-2 rounded-lg bg-muted/40">
-                    <span className="text-[10px] text-muted-foreground block">Bench Slot</span>
-                    <span className="font-extrabold text-foreground font-mono text-sm">
-                      Seat #{seat.seat_index + 1}
+                    <span className="text-[10px] text-muted-foreground block">Type</span>
+                    <span className="font-bold text-foreground text-xs">
+                      {seat.is_arrear ? 'Arrear' : 'Regular'}
                     </span>
                   </div>
                 </div>

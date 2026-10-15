@@ -48,8 +48,8 @@ export const BenchCard: React.FC<BenchCardProps> = ({
         <span className="font-mono">
           R{row + 1} &bull; C{col + 1}
         </span>
-        <span className="text-[9px] uppercase tracking-wider opacity-60">
-          Bench
+        <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-muted text-muted-foreground border border-border/60 uppercase">
+          {seatsCount}S
         </span>
       </div>
 

@@ -53,6 +53,12 @@ export const RoomSelector: React.FC<RoomSelectorProps> = ({
                   </span>
                 </div>
 
+                {room.seater_breakdown && (
+                  <div className={`text-[10px] font-mono truncate ${isActive ? 'text-primary-foreground/90 font-medium' : 'text-muted-foreground'}`}>
+                    {room.seater_breakdown}
+                  </div>
+                )}
+
                 <div className={`text-xs flex items-center gap-1 truncate ${isActive ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
                   <User className="w-3 h-3 flex-shrink-0" />
                   <span className="truncate">{room.invigilator_name || 'No Invigilator'}</span>
